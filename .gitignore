@@ -95,3 +95,6 @@ tmp/
 test_config.py
 test_db_connection.py
 test_simple_connection.py
+
+#archivos de claude locales
+.claude
