@@ -13,13 +13,14 @@ class Settings(BaseSettings):
     SECRET_KEY: str = "your-secret-key-change-this-in-production"
     ALGORITHM: str = "HS256"
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 30
+    REFRESH_TOKEN_EXPIRE_DAYS: int = 7
     
     # Database
     DATABASE_URL: Optional[str] = None
     POSTGRES_SERVER: str = "localhost"
-    POSTGRES_USER: str = "postgres"
-    POSTGRES_PASSWORD: str = "password"
-    POSTGRES_DB: str = "rbac_db"
+    POSTGRES_USER: str = "rbac_user"
+    POSTGRES_PASSWORD: str = "rbac_password"
+    POSTGRES_DB: str = "rbac_app"
     POSTGRES_PORT: int = 5432
     
     @computed_field

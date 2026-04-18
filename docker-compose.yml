@@ -1,0 +1,28 @@
+services:
+  postgres:
+    image: postgres:17-alpine3.22
+    container_name: rbac_postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: rbac_user
+      POSTGRES_PASSWORD: rbac_password
+      POSTGRES_DB: rbac_app
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U rbac_user -d rbac_app"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - rbac_network
+
+volumes:
+  postgres_data:
+    name: rbac_postgres_data
+
+networks:
+  rbac_network:
+    name: rbac_network

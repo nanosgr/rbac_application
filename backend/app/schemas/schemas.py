@@ -16,11 +16,16 @@ class PaginatedResponse(SQLModel, Generic[T]):
 
 class Token(SQLModel):
     access_token: str
+    refresh_token: str
     token_type: str
 
 
 class TokenData(SQLModel):
     username: Optional[str] = None
+
+
+class RefreshTokenRequest(SQLModel):
+    refresh_token: str
 
 
 class UserLogin(SQLModel):
