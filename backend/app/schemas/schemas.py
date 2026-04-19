@@ -20,10 +20,6 @@ class Token(SQLModel):
     token_type: str
 
 
-class TokenData(SQLModel):
-    username: Optional[str] = None
-
-
 class RefreshTokenRequest(SQLModel):
     refresh_token: str
 

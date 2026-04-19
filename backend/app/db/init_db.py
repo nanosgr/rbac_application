@@ -1,6 +1,6 @@
 from sqlmodel import SQLModel, Session, select
 from app.db.database import engine
-from app.models.models import User, Role, Permission, UserRoleLink, RolePermissionLink
+from app.models.models import User, Role, Permission
 from app.core.security import get_password_hash
 
 

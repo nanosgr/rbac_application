@@ -9,7 +9,7 @@ from app.core.deps import get_current_active_user
 from app.models.models import User
 from app.services.crud import user_service
 from app.services.audit_service import audit_service
-from app.schemas.schemas import Token, UserLogin, RefreshTokenRequest
+from app.schemas.schemas import Token, RefreshTokenRequest
 
 router = APIRouter()
 
@@ -38,24 +38,6 @@ async def login_for_access_token(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Incorrect username or password",
             headers={"WWW-Authenticate": "Bearer"},
-        )
-    audit_service.log(db, action="login", resource="auth",
-                      user_id=user.id, username=user.username,
-                      ip=request.client.host if request.client else None)
-    return _build_tokens(user.username)
-
-
-@router.post("/login-json", response_model=Token)
-async def login_json(
-    request: Request,
-    user_credentials: UserLogin,
-    db: Session = Depends(get_db),
-):
-    user = user_service.authenticate_user(db, user_credentials.username, user_credentials.password)
-    if not user:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Incorrect username or password",
         )
     audit_service.log(db, action="login", resource="auth",
                       user_id=user.id, username=user.username,
