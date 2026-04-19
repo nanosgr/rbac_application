@@ -21,8 +21,8 @@ export default function Home() {
   return (
     <div className="flex items-center justify-center min-h-screen">
       <div className="text-center">
-        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto"></div>
-        <p className="mt-4 text-gray-600">Cargando...</p>
+        <div className="animate-spin rounded-full h-10 w-10 border-2 border-stone-200 border-t-stone-600 mx-auto"></div>
+        <p className="mt-4 text-sm text-stone-400">Cargando...</p>
       </div>
     </div>
   );

@@ -24,10 +24,10 @@ interface NavItem {
 
 const navItems: NavItem[] = [
   { label: 'Dashboard',  href: '/dashboard',             icon: LayoutDashboard, permissions: ['dashboard:read'] },
-  { label: 'Mi Perfil',  href: '/dashboard/profile',     icon: User },
-  { label: 'Usuarios',   href: '/dashboard/users',       icon: Users,           permissions: ['users:read'] },
-  { label: 'Roles',      href: '/dashboard/roles',       icon: Shield,          permissions: ['roles:read'] },
-  { label: 'Permisos',   href: '/dashboard/permissions', icon: Key,             permissions: ['permissions:read'] },
+  { label: 'Mi Perfil',  href: '/profile',     icon: User },
+  { label: 'Usuarios',   href: '/users',       icon: Users,  permissions: ['users:read'] },
+  { label: 'Roles',      href: '/roles',       icon: Shield, permissions: ['roles:read'] },
+  { label: 'Permisos',   href: '/permissions', icon: Key,    permissions: ['permissions:read'] },
 ];
 
 interface SidebarProps {
