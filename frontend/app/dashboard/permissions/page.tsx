@@ -256,33 +256,33 @@ export default function PermissionsPage() {
             <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg text-sm">{formError}</div>
           )}
           {editingPermission ? (
-            <div className="flex gap-2 p-3 bg-gray-50 rounded-lg">
-              <span className="px-2 py-1 bg-blue-100 text-blue-800 text-xs rounded">{editingPermission.resource}</span>
-              <span className="px-2 py-1 bg-green-100 text-green-800 text-xs rounded">{editingPermission.action}</span>
-              <span className="text-xs text-gray-500 self-center">— inmutables</span>
+            <div className="flex gap-2 p-3 bg-stone-50 dark:bg-stone-800 rounded-md">
+              <span className="px-2 py-1 bg-blue-100 dark:bg-blue-900/50 text-blue-800 dark:text-blue-300 text-xs rounded">{editingPermission.resource}</span>
+              <span className="px-2 py-1 bg-emerald-100 dark:bg-emerald-900/50 text-emerald-800 dark:text-emerald-300 text-xs rounded">{editingPermission.action}</span>
+              <span className="text-xs text-stone-400 dark:text-stone-500 self-center">— inmutables</span>
             </div>
           ) : (
             <>
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Recurso *</label>
+                <label className="block text-xs font-medium text-stone-600 dark:text-stone-400 mb-1.5">Recurso *</label>
                 <select
                   value={formData.resource}
                   onChange={(e) => handleResourceChange(e.target.value)}
-                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  className="w-full px-3 py-2 text-sm rounded-md border border-stone-200 dark:border-stone-700 bg-white dark:bg-stone-900 text-stone-900 dark:text-stone-100 focus:outline-none focus:ring-2 focus:ring-blue-500/40 focus:border-blue-500 transition-colors"
                 >
-                  <option value="">Seleccionar recurso...</option>
-                  {availableResources.map((r) => <option key={r} value={r}>{r}</option>)}
+                  <option value="" className="bg-white dark:bg-stone-900">Seleccionar recurso...</option>
+                  {availableResources.map((r) => <option key={r} value={r} className="bg-white dark:bg-stone-900">{r}</option>)}
                 </select>
               </div>
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Acción *</label>
+                <label className="block text-xs font-medium text-stone-600 dark:text-stone-400 mb-1.5">Acción *</label>
                 <select
                   value={formData.action}
                   onChange={(e) => handleActionChange(e.target.value)}
-                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  className="w-full px-3 py-2 text-sm rounded-md border border-stone-200 dark:border-stone-700 bg-white dark:bg-stone-900 text-stone-900 dark:text-stone-100 focus:outline-none focus:ring-2 focus:ring-blue-500/40 focus:border-blue-500 transition-colors"
                 >
-                  <option value="">Seleccionar acción...</option>
-                  {availableActions.map((a) => <option key={a} value={a}>{a}</option>)}
+                  <option value="" className="bg-white dark:bg-stone-900">Seleccionar acción...</option>
+                  {availableActions.map((a) => <option key={a} value={a} className="bg-white dark:bg-stone-900">{a}</option>)}
                 </select>
               </div>
             </>
@@ -299,14 +299,14 @@ export default function PermissionsPage() {
             onChange={(e) => setFormData({ ...formData, description: e.target.value })}
             placeholder="Descripción del permiso"
           />
-          <label className="flex items-center space-x-2 cursor-pointer">
+          <label className="flex items-center gap-2 cursor-pointer">
             <input
               type="checkbox"
               checked={formData.is_active}
               onChange={(e) => setFormData({ ...formData, is_active: e.target.checked })}
-              className="rounded"
+              className="rounded accent-blue-600"
             />
-            <span className="text-sm font-medium text-gray-700">Permiso Activo</span>
+            <span className="text-sm font-medium text-stone-700 dark:text-stone-300">Permiso Activo</span>
           </label>
         </div>
       </Modal>

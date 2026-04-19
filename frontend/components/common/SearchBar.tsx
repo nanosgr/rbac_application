@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { Search, X } from 'lucide-react';
 
 interface SearchBarProps {
   placeholder?: string;
@@ -14,49 +15,34 @@ export default function SearchBar({
   const [query, setQuery] = useState('');
 
   useEffect(() => {
-    const timer = setTimeout(() => {
-      onSearch(query);
-    }, debounceMs);
-
+    const timer = setTimeout(() => { onSearch(query); }, debounceMs);
     return () => clearTimeout(timer);
   }, [query, debounceMs, onSearch]);
 
   return (
     <div className="relative">
-      <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-        <svg
-          className="h-5 w-5 text-gray-400"
-          fill="none"
-          stroke="currentColor"
-          viewBox="0 0 24 24"
-        >
-          <path
-            strokeLinecap="round"
-            strokeLinejoin="round"
-            strokeWidth={2}
-            d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"
-          />
-        </svg>
-      </div>
+      <Search className="absolute inset-y-0 left-3 my-auto w-4 h-4 text-stone-400 dark:text-stone-500 pointer-events-none" />
       <input
         type="text"
         value={query}
         onChange={(e) => setQuery(e.target.value)}
-        className="block w-full pl-10 pr-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+        className="
+          w-full pl-9 pr-8 py-2 text-sm rounded-md border transition-colors duration-150
+          bg-white dark:bg-stone-900
+          text-stone-900 dark:text-stone-100
+          placeholder:text-stone-400 dark:placeholder:text-stone-600
+          border-stone-200 dark:border-stone-700
+          hover:border-stone-300 dark:hover:border-stone-600
+          focus:outline-none focus:ring-2 focus:ring-blue-500/40 focus:border-blue-500
+        "
         placeholder={placeholder}
       />
       {query && (
         <button
           onClick={() => setQuery('')}
-          className="absolute inset-y-0 right-0 pr-3 flex items-center text-gray-400 hover:text-gray-600"
+          className="absolute inset-y-0 right-2 my-auto p-0.5 text-stone-400 hover:text-stone-600 dark:hover:text-stone-300 transition-colors"
         >
-          <svg className="h-5 w-5" fill="currentColor" viewBox="0 0 20 20">
-            <path
-              fillRule="evenodd"
-              d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z"
-              clipRule="evenodd"
-            />
-          </svg>
+          <X className="w-3.5 h-3.5" />
         </button>
       )}
     </div>

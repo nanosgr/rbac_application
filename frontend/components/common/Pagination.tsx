@@ -14,174 +14,95 @@ interface PaginationProps {
 }
 
 export default function Pagination({
-  currentPage,
-  totalPages,
-  onPageChange,
-  onFirstPage,
-  onLastPage,
-  onPreviousPage,
-  onNextPage,
-  startIndex,
-  endIndex,
-  totalItems,
-  itemsPerPage,
-  onItemsPerPageChange,
+  currentPage, totalPages, onPageChange,
+  onFirstPage, onLastPage, onPreviousPage, onNextPage,
+  startIndex, endIndex, totalItems, itemsPerPage, onItemsPerPageChange,
 }: PaginationProps) {
   const itemsPerPageOptions = [10, 25, 50, 100];
 
-  // Generate page numbers to show
   const getPageNumbers = () => {
     const pages: (number | string)[] = [];
     const maxVisible = 5;
-
     if (totalPages <= maxVisible) {
-      for (let i = 1; i <= totalPages; i++) {
-        pages.push(i);
-      }
+      for (let i = 1; i <= totalPages; i++) pages.push(i);
     } else {
-      // Always show first page
       pages.push(1);
-
-      if (currentPage > 3) {
-        pages.push('...');
-      }
-
-      // Show current page and neighbors
+      if (currentPage > 3) pages.push('...');
       const start = Math.max(2, currentPage - 1);
       const end = Math.min(totalPages - 1, currentPage + 1);
-
-      for (let i = start; i <= end; i++) {
-        pages.push(i);
-      }
-
-      if (currentPage < totalPages - 2) {
-        pages.push('...');
-      }
-
-      // Always show last page
-      if (totalPages > 1) {
-        pages.push(totalPages);
-      }
+      for (let i = start; i <= end; i++) pages.push(i);
+      if (currentPage < totalPages - 2) pages.push('...');
+      if (totalPages > 1) pages.push(totalPages);
     }
-
     return pages;
   };
 
-  if (totalPages === 0) {
-    return null;
-  }
+  if (totalPages === 0) return null;
+
+  const navBtn = (disabled: boolean) =>
+    `px-2.5 py-1 rounded-md text-sm font-medium transition-colors ${
+      disabled
+        ? 'text-stone-300 dark:text-stone-600 cursor-not-allowed'
+        : 'text-stone-500 dark:text-stone-400 hover:bg-stone-100 dark:hover:bg-stone-800 hover:text-stone-800 dark:hover:text-stone-200'
+    }`;
 
   return (
-    <div className="flex flex-col sm:flex-row items-center justify-between gap-4 mt-6 pt-4 border-t border-gray-200">
-      {/* Items per page selector */}
-      <div className="flex items-center space-x-2">
-        <label className="text-sm text-gray-700">Mostrar:</label>
+    <div className="flex flex-col sm:flex-row items-center justify-between gap-3 mt-5 pt-4 border-t border-stone-100 dark:border-stone-800">
+      {/* Items per page */}
+      <div className="flex items-center gap-2">
+        <label className="text-xs text-stone-500 dark:text-stone-400">Mostrar:</label>
         <select
           value={itemsPerPage}
           onChange={(e) => onItemsPerPageChange(Number(e.target.value))}
-          className="px-3 py-1 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
+          className="
+            px-2 py-1 text-xs rounded-md border transition-colors
+            bg-white dark:bg-stone-900
+            text-stone-700 dark:text-stone-300
+            border-stone-200 dark:border-stone-700
+            focus:outline-none focus:ring-2 focus:ring-blue-500/40 focus:border-blue-500
+          "
         >
-          {itemsPerPageOptions.map((option) => (
-            <option key={option} value={option}>
-              {option}
+          {itemsPerPageOptions.map((opt) => (
+            <option key={opt} value={opt} className="bg-white dark:bg-stone-900">
+              {opt}
             </option>
           ))}
         </select>
-        <span className="text-sm text-gray-700">por página</span>
+        <span className="text-xs text-stone-500 dark:text-stone-400">por página</span>
       </div>
 
-      {/* Info text */}
-      <div className="text-sm text-gray-700">
-        Mostrando <span className="font-medium">{startIndex}</span> -{' '}
-        <span className="font-medium">{endIndex}</span> de{' '}
-        <span className="font-medium">{totalItems}</span> resultados
-      </div>
+      {/* Info */}
+      <p className="text-xs text-stone-500 dark:text-stone-400 tabular-nums">
+        <span className="font-medium text-stone-700 dark:text-stone-300">{startIndex}–{endIndex}</span>
+        {' '}de{' '}
+        <span className="font-medium text-stone-700 dark:text-stone-300">{totalItems}</span>
+      </p>
 
-      {/* Pagination controls */}
-      <div className="flex items-center space-x-1">
-        {/* First page */}
-        <button
-          onClick={onFirstPage}
-          disabled={currentPage === 1}
-          className={`px-3 py-1 rounded-lg text-sm font-medium transition-colors ${
-            currentPage === 1
-              ? 'text-gray-400 cursor-not-allowed'
-              : 'text-gray-700 hover:bg-gray-100'
-          }`}
-          title="Primera página"
-        >
-          ⟪
-        </button>
+      {/* Controls */}
+      <div className="flex items-center gap-0.5">
+        <button onClick={onFirstPage} disabled={currentPage === 1} className={navBtn(currentPage === 1)} title="Primera página">⟪</button>
+        <button onClick={onPreviousPage} disabled={currentPage === 1} className={navBtn(currentPage === 1)} title="Anterior">‹</button>
 
-        {/* Previous page */}
-        <button
-          onClick={onPreviousPage}
-          disabled={currentPage === 1}
-          className={`px-3 py-1 rounded-lg text-sm font-medium transition-colors ${
-            currentPage === 1
-              ? 'text-gray-400 cursor-not-allowed'
-              : 'text-gray-700 hover:bg-gray-100'
-          }`}
-          title="Página anterior"
-        >
-          ‹
-        </button>
-
-        {/* Page numbers */}
-        {getPageNumbers().map((page, index) => {
-          if (page === '...') {
-            return (
-              <span
-                key={`ellipsis-${index}`}
-                className="px-3 py-1 text-gray-500"
-              >
-                ...
-              </span>
-            );
-          }
-
-          return (
+        {getPageNumbers().map((page, i) =>
+          page === '...' ? (
+            <span key={`e-${i}`} className="px-2 py-1 text-xs text-stone-400 dark:text-stone-600">…</span>
+          ) : (
             <button
               key={page}
               onClick={() => onPageChange(page as number)}
-              className={`px-3 py-1 rounded-lg text-sm font-medium transition-colors ${
+              className={`px-2.5 py-1 rounded-md text-xs font-medium transition-colors ${
                 currentPage === page
-                  ? 'bg-blue-600 text-white'
-                  : 'text-gray-700 hover:bg-gray-100'
+                  ? 'bg-stone-900 dark:bg-stone-100 text-white dark:text-stone-900'
+                  : 'text-stone-600 dark:text-stone-400 hover:bg-stone-100 dark:hover:bg-stone-800'
               }`}
             >
               {page}
             </button>
-          );
-        })}
+          )
+        )}
 
-        {/* Next page */}
-        <button
-          onClick={onNextPage}
-          disabled={currentPage === totalPages}
-          className={`px-3 py-1 rounded-lg text-sm font-medium transition-colors ${
-            currentPage === totalPages
-              ? 'text-gray-400 cursor-not-allowed'
-              : 'text-gray-700 hover:bg-gray-100'
-          }`}
-          title="Página siguiente"
-        >
-          ›
-        </button>
-
-        {/* Last page */}
-        <button
-          onClick={onLastPage}
-          disabled={currentPage === totalPages}
-          className={`px-3 py-1 rounded-lg text-sm font-medium transition-colors ${
-            currentPage === totalPages
-              ? 'text-gray-400 cursor-not-allowed'
-              : 'text-gray-700 hover:bg-gray-100'
-          }`}
-          title="Última página"
-        >
-          ⟫
-        </button>
+        <button onClick={onNextPage} disabled={currentPage === totalPages} className={navBtn(currentPage === totalPages)} title="Siguiente">›</button>
+        <button onClick={onLastPage} disabled={currentPage === totalPages} className={navBtn(currentPage === totalPages)} title="Última página">⟫</button>
       </div>
     </div>
   );

@@ -8,6 +8,33 @@ import Card from '@/components/common/Card';
 import { User } from '@/types';
 import { Users, ShieldCheck, KeyRound, Star } from 'lucide-react';
 
+interface StatCardProps {
+  label: string;
+  value: string | number;
+  sub: string;
+  icon: React.ReactNode;
+  iconBg: string;
+}
+
+function StatCard({ label, value, sub, icon, iconBg }: StatCardProps) {
+  return (
+    <Card>
+      <div className="flex items-start justify-between gap-3">
+        <div className="flex-1 min-w-0">
+          <p className="text-xs font-medium text-stone-500 dark:text-stone-400">{label}</p>
+          <p className="text-2xl font-semibold text-stone-800 dark:text-stone-100 mt-1 tabular-nums">
+            {value}
+          </p>
+          <p className="text-xs text-stone-400 dark:text-stone-500 mt-1">{sub}</p>
+        </div>
+        <div className={`w-9 h-9 rounded-lg ${iconBg} flex items-center justify-center shrink-0`}>
+          {icon}
+        </div>
+      </div>
+    </Card>
+  );
+}
+
 export default function DashboardPage() {
   const { user } = useAuth();
   const [stats, setStats] = useState({ totalUsers: 0, totalRoles: 0, totalPermissions: 0, activeUsers: 0 });
@@ -15,16 +42,15 @@ export default function DashboardPage() {
   const [isLoading, setIsLoading] = useState(true);
 
   useEffect(() => {
-    const loadDashboardData = async () => {
+    const load = async () => {
       try {
-        const [usersRes, rolesRes, permsRes, recentRes] = await Promise.all([
+        const [usersRes, rolesRes, permsRes, recentRes, activeRes] = await Promise.all([
           userService.getAll({ page: 1, size: 1 }).catch(() => null),
           roleService.getAll({ page: 1, size: 1 }).catch(() => null),
           permissionService.getAll({ page: 1, size: 1 }).catch(() => null),
           userService.getAll({ page: 1, size: 5 }).catch(() => null),
+          userService.getAll({ page: 1, size: 1, is_active: true }).catch(() => null),
         ]);
-
-        const activeRes = await userService.getAll({ page: 1, size: 1, is_active: true }).catch(() => null);
 
         setStats({
           totalUsers: usersRes?.total ?? 0,
@@ -33,118 +59,84 @@ export default function DashboardPage() {
           activeUsers: activeRes?.total ?? 0,
         });
         setRecentUsers(recentRes?.items ?? []);
-      } catch {
-        // silencioso si no hay permisos
-      } finally {
-        setIsLoading(false);
-      }
+      } catch { /* sin permisos suficientes */ }
+      finally { setIsLoading(false); }
     };
-
-    loadDashboardData();
+    load();
   }, []);
 
   return (
     <DashboardLayout title="Panel de Control">
-      <div className="space-y-6">
-        {/* Welcome */}
-        <div className="bg-gradient-to-r from-blue-600 to-indigo-600 rounded-lg shadow-lg p-6 text-white">
-          <h2 className="text-2xl font-bold">Bienvenido, {user?.full_name}</h2>
-          <p className="mt-2 text-blue-100">
-            Panel de administración RBAC — {user?.roles?.[0]?.name ?? 'Usuario'}
+      <div className="space-y-6 max-w-6xl">
+        {/* Welcome banner */}
+        <div className="rounded-lg bg-stone-100 dark:bg-stone-800 border border-stone-200 dark:border-stone-700 px-5 py-4">
+          <p className="text-xs font-medium text-stone-400 dark:text-stone-500 uppercase tracking-wider">Bienvenido</p>
+          <h2 className="text-lg font-semibold text-stone-900 dark:text-stone-100 mt-0.5">{user?.full_name}</h2>
+          <p className="text-sm text-stone-500 dark:text-stone-400 mt-0.5">
+            {user?.roles?.[0]?.name ?? 'Usuario'} · Panel de administración RBAC
           </p>
         </div>
 
-        {/* Stats */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-          <Card className="hover:shadow-md transition-shadow">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-sm text-gray-600 font-medium">Total Usuarios</p>
-                <p className="text-3xl font-bold text-gray-800 mt-2">
-                  {isLoading ? '—' : stats.totalUsers}
-                </p>
-              </div>
-              <div className="w-12 h-12 bg-blue-100 rounded-full flex items-center justify-center">
-                <Users className="w-6 h-6 text-blue-600" />
-              </div>
-            </div>
-            <div className="mt-4 text-sm text-green-600 font-medium">
-              {stats.activeUsers} activos
-            </div>
-          </Card>
-
-          <Card className="hover:shadow-md transition-shadow">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-sm text-gray-600 font-medium">Roles</p>
-                <p className="text-3xl font-bold text-gray-800 mt-2">
-                  {isLoading ? '—' : stats.totalRoles}
-                </p>
-              </div>
-              <div className="w-12 h-12 bg-purple-100 rounded-full flex items-center justify-center">
-                <ShieldCheck className="w-6 h-6 text-purple-600" />
-              </div>
-            </div>
-            <div className="mt-4 text-sm text-gray-500">Roles del sistema</div>
-          </Card>
-
-          <Card className="hover:shadow-md transition-shadow">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-sm text-gray-600 font-medium">Permisos</p>
-                <p className="text-3xl font-bold text-gray-800 mt-2">
-                  {isLoading ? '—' : stats.totalPermissions}
-                </p>
-              </div>
-              <div className="w-12 h-12 bg-green-100 rounded-full flex items-center justify-center">
-                <KeyRound className="w-6 h-6 text-green-600" />
-              </div>
-            </div>
-            <div className="mt-4 text-sm text-gray-500">Permisos configurados</div>
-          </Card>
-
-          <Card className="hover:shadow-md transition-shadow">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-sm text-gray-600 font-medium">Mi Rol</p>
-                <p className="text-lg font-bold text-gray-800 mt-2">
-                  {user?.roles?.[0]?.name ?? 'N/A'}
-                </p>
-              </div>
-              <div className="w-12 h-12 bg-yellow-100 rounded-full flex items-center justify-center">
-                <Star className="w-6 h-6 text-yellow-600" />
-              </div>
-            </div>
-            <div className="mt-4 text-sm text-gray-500">
-              {user?.is_superuser ? 'Acceso total' : 'Acceso limitado'}
-            </div>
-          </Card>
+        {/* Stats grid */}
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+          <StatCard
+            label="Usuarios"
+            value={isLoading ? '—' : stats.totalUsers}
+            sub={`${stats.activeUsers} activos`}
+            icon={<Users className="w-4 h-4 text-blue-600" />}
+            iconBg="bg-blue-50 dark:bg-blue-950/50"
+          />
+          <StatCard
+            label="Roles"
+            value={isLoading ? '—' : stats.totalRoles}
+            sub="Roles del sistema"
+            icon={<ShieldCheck className="w-4 h-4 text-violet-600" />}
+            iconBg="bg-violet-50 dark:bg-violet-950/50"
+          />
+          <StatCard
+            label="Permisos"
+            value={isLoading ? '—' : stats.totalPermissions}
+            sub="Configurados"
+            icon={<KeyRound className="w-4 h-4 text-emerald-600" />}
+            iconBg="bg-emerald-50 dark:bg-emerald-950/50"
+          />
+          <StatCard
+            label="Mi Rol"
+            value={user?.roles?.[0]?.name ?? 'N/A'}
+            sub={user?.is_superuser ? 'Acceso total' : 'Acceso limitado'}
+            icon={<Star className="w-4 h-4 text-amber-500" />}
+            iconBg="bg-amber-50 dark:bg-amber-950/50"
+          />
         </div>
 
-        {/* Recent Activity */}
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-          <Card title="Usuarios Recientes">
+        {/* Content grid */}
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+          <Card title="Usuarios recientes">
             {isLoading ? (
-              <div className="text-center py-8 text-gray-500">Cargando...</div>
+              <div className="text-sm text-stone-400 py-4 text-center">Cargando...</div>
             ) : recentUsers.length > 0 ? (
-              <div className="space-y-3">
+              <div className="space-y-2">
                 {recentUsers.map((u) => (
                   <div
                     key={u.id}
-                    className="flex items-center justify-between p-3 bg-gray-50 rounded-lg hover:bg-gray-100 transition-colors"
+                    className="flex items-center justify-between gap-3 py-2 border-b border-stone-50 dark:border-stone-800 last:border-0"
                   >
-                    <div className="flex items-center space-x-3">
-                      <div className="w-10 h-10 rounded-full bg-blue-500 flex items-center justify-center text-white font-semibold">
+                    <div className="flex items-center gap-3">
+                      <div className="w-8 h-8 rounded-full bg-blue-600 flex items-center justify-center text-white text-xs font-semibold shrink-0">
                         {u.username[0].toUpperCase()}
                       </div>
-                      <div>
-                        <p className="font-medium text-gray-800">{u.full_name}</p>
-                        <p className="text-sm text-gray-500">{u.email}</p>
+                      <div className="min-w-0">
+                        <p className="text-sm font-medium text-stone-700 dark:text-stone-200 truncate">
+                          {u.full_name}
+                        </p>
+                        <p className="text-xs text-stone-400 truncate">{u.email}</p>
                       </div>
                     </div>
                     <span
-                      className={`px-2 py-1 text-xs font-medium rounded ${
-                        u.is_active ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'
+                      className={`shrink-0 px-2 py-0.5 text-xs font-medium rounded-full ${
+                        u.is_active
+                          ? 'bg-emerald-50 text-emerald-700 dark:bg-emerald-950/50 dark:text-emerald-400'
+                          : 'bg-red-50 text-red-700 dark:bg-red-950/50 dark:text-red-400'
                       }`}
                     >
                       {u.is_active ? 'Activo' : 'Inactivo'}
@@ -153,28 +145,30 @@ export default function DashboardPage() {
                 ))}
               </div>
             ) : (
-              <div className="text-center py-8 text-gray-500">No hay usuarios registrados</div>
+              <p className="text-sm text-stone-400 py-4 text-center">No hay usuarios registrados</p>
             )}
           </Card>
 
-          <Card title="Mis Permisos">
+          <Card title="Mis permisos">
             {user?.roles && user.roles.length > 0 ? (
-              <div className="space-y-4">
+              <div className="space-y-3">
                 {user.roles.map((role) => (
                   <div key={role.id}>
-                    <h4 className="font-semibold text-gray-800 mb-2">{role.name}</h4>
-                    <div className="flex flex-wrap gap-2">
-                      {role.permissions.slice(0, 6).map((perm) => (
+                    <p className="text-xs font-semibold text-stone-500 dark:text-stone-400 uppercase tracking-wider mb-2">
+                      {role.name}
+                    </p>
+                    <div className="flex flex-wrap gap-1.5">
+                      {role.permissions.slice(0, 8).map((perm) => (
                         <span
                           key={perm.id}
-                          className="px-3 py-1 bg-blue-100 text-blue-800 text-sm rounded-full"
+                          className="px-2 py-0.5 bg-stone-100 dark:bg-stone-800 text-stone-600 dark:text-stone-300 text-xs rounded font-mono"
                         >
                           {perm.name}
                         </span>
                       ))}
-                      {role.permissions.length > 6 && (
-                        <span className="px-3 py-1 bg-gray-100 text-gray-600 text-sm rounded-full">
-                          +{role.permissions.length - 6} más
+                      {role.permissions.length > 8 && (
+                        <span className="px-2 py-0.5 bg-stone-100 dark:bg-stone-800 text-stone-400 text-xs rounded">
+                          +{role.permissions.length - 8}
                         </span>
                       )}
                     </div>
@@ -182,7 +176,7 @@ export default function DashboardPage() {
                 ))}
               </div>
             ) : (
-              <div className="text-center py-8 text-gray-500">No tienes roles asignados</div>
+              <p className="text-sm text-stone-400 py-4 text-center">No tienes roles asignados</p>
             )}
           </Card>
         </div>

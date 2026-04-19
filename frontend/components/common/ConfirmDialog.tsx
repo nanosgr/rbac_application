@@ -66,7 +66,7 @@ export default function ConfirmDialog({
           {icons[variant]}
         </div>
         <div className="flex-1">
-          <p className="text-gray-700">{message}</p>
+          <p className="text-sm text-stone-700 dark:text-stone-300">{message}</p>
         </div>
       </div>
     </Modal>

@@ -2,6 +2,7 @@
 
 import { useAuth } from '@/context/AuthContext';
 import ThemeToggle from '@/components/common/ThemeToggle';
+import { Menu } from 'lucide-react';
 
 interface HeaderProps {
   onMenuClick: () => void;
@@ -12,59 +13,28 @@ export default function Header({ onMenuClick, title = 'Dashboard' }: HeaderProps
   const { user } = useAuth();
 
   return (
-    <header className="bg-white dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 h-16 flex items-center justify-between px-4 lg:px-6 transition-colors">
-      <div className="flex items-center space-x-4">
+    <header className="bg-white dark:bg-stone-900 border-b border-stone-200 dark:border-stone-800 h-14 flex items-center justify-between px-4 lg:px-6 shrink-0">
+      <div className="flex items-center gap-3">
         <button
           onClick={onMenuClick}
-          className="lg:hidden text-gray-600 dark:text-gray-300 hover:text-gray-800 dark:hover:text-gray-100 p-2"
+          className="lg:hidden p-1.5 rounded-md text-stone-500 hover:text-stone-700 dark:text-stone-400 dark:hover:text-stone-200 hover:bg-stone-100 dark:hover:bg-stone-800 transition-colors"
+          aria-label="Abrir menú"
         >
-          <svg
-            className="w-6 h-6"
-            fill="none"
-            stroke="currentColor"
-            viewBox="0 0 24 24"
-          >
-            <path
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              strokeWidth={2}
-              d="M4 6h16M4 12h16M4 18h16"
-            />
-          </svg>
+          <Menu className="w-5 h-5" />
         </button>
-        <h2 className="text-lg lg:text-xl font-semibold text-gray-800 dark:text-gray-100">{title}</h2>
+        <h1 className="text-sm font-semibold text-stone-800 dark:text-stone-100">{title}</h1>
       </div>
 
-      <div className="flex items-center space-x-3">
-        {/* Theme Toggle */}
+      <div className="flex items-center gap-2">
         <ThemeToggle />
 
-        {/* Notifications */}
-        <button className="relative p-2 text-gray-600 dark:text-gray-300 hover:text-gray-800 dark:hover:text-gray-100">
-          <svg
-            className="w-6 h-6"
-            fill="none"
-            stroke="currentColor"
-            viewBox="0 0 24 24"
-          >
-            <path
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              strokeWidth={2}
-              d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9"
-            />
-          </svg>
-          {/* Notification badge */}
-          <span className="absolute top-1 right-1 w-2 h-2 bg-red-500 rounded-full"></span>
-        </button>
-
-        {/* User info - desktop */}
-        <div className="hidden md:flex items-center space-x-2">
-          <div className="text-right">
-            <p className="text-sm font-medium text-gray-800 dark:text-gray-100">{user?.full_name}</p>
-            <p className="text-xs text-gray-500 dark:text-gray-400">
-              {user?.roles?.[0]?.name || 'Usuario'}
-            </p>
+        <div className="hidden sm:flex items-center gap-2 pl-2 border-l border-stone-200 dark:border-stone-800 ml-1">
+          <div className="w-7 h-7 rounded-full bg-blue-600 flex items-center justify-center text-white text-xs font-semibold">
+            {user?.username?.[0]?.toUpperCase()}
+          </div>
+          <div className="hidden md:block text-right">
+            <p className="text-xs font-medium text-stone-700 dark:text-stone-200 leading-tight">{user?.full_name}</p>
+            <p className="text-xs text-stone-400 dark:text-stone-500">{user?.roles?.[0]?.name ?? 'Usuario'}</p>
           </div>
         </div>
       </div>

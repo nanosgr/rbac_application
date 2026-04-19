@@ -25,44 +25,50 @@ export default function Table<T extends { id: number | string }>({
   if (data.length === 0) {
     return (
       <div className="text-center py-12">
-        <p className="text-gray-500">{emptyMessage}</p>
+        <p className="text-sm text-stone-400 dark:text-stone-500">{emptyMessage}</p>
       </div>
     );
   }
 
   return (
-    <div className="overflow-x-auto">
-      <table className="min-w-full divide-y divide-gray-200">
-        <thead className="bg-gray-50">
+    <div className="overflow-x-auto -mx-5 sm:mx-0">
+      <table className="min-w-full divide-y divide-stone-100 dark:divide-stone-800">
+        <thead>
           <tr>
             {columns.map((column, index) => (
               <th
                 key={index}
-                className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider"
+                className="px-4 py-3 text-left text-xs font-medium text-stone-500 dark:text-stone-400 uppercase tracking-wider bg-stone-50 dark:bg-stone-900/50 first:pl-5 last:pr-5"
               >
                 {column.label}
               </th>
             ))}
             {actions.length > 0 && (
-              <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
+              <th className="px-4 py-3 text-right text-xs font-medium text-stone-500 dark:text-stone-400 uppercase tracking-wider bg-stone-50 dark:bg-stone-900/50 last:pr-5">
                 Acciones
               </th>
             )}
           </tr>
         </thead>
-        <tbody className="bg-white divide-y divide-gray-200">
+        <tbody className="divide-y divide-stone-100 dark:divide-stone-800">
           {data.map((item) => (
-            <tr key={item.id} className="hover:bg-gray-50">
+            <tr
+              key={item.id}
+              className="hover:bg-stone-50 dark:hover:bg-stone-800/40 transition-colors"
+            >
               {columns.map((column, colIndex) => (
-                <td key={colIndex} className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                <td
+                  key={colIndex}
+                  className="px-4 py-3 text-sm text-stone-700 dark:text-stone-300 first:pl-5 last:pr-5"
+                >
                   {column.render
                     ? column.render(item)
                     : String((item as Record<string, unknown>)[column.key as string] ?? '')}
                 </td>
               ))}
               {actions.length > 0 && (
-                <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
-                  <div className="flex items-center justify-end space-x-2">
+                <td className="px-4 py-3 last:pr-5">
+                  <div className="flex items-center justify-end gap-1.5">
                     {actions.map((action, actionIndex) => (
                       <ProtectedComponent
                         key={actionIndex}
@@ -70,10 +76,9 @@ export default function Table<T extends { id: number | string }>({
                       >
                         <Button
                           size="sm"
-                          variant={action.variant || 'secondary'}
+                          variant={action.variant || 'ghost'}
                           onClick={() => action.onClick(item)}
                           title={action.label}
-                          className="!px-2"
                         >
                           {action.icon ?? action.label}
                         </Button>

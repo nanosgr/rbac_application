@@ -4,44 +4,30 @@ import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { useAuth } from '@/context/AuthContext';
 import ProtectedComponent from '@/components/common/ProtectedComponent';
+import {
+  LayoutDashboard,
+  User,
+  Users,
+  Shield,
+  Key,
+  LogOut,
+  X,
+  type LucideIcon,
+} from 'lucide-react';
 
 interface NavItem {
   label: string;
   href: string;
-  icon: string;
+  icon: LucideIcon;
   permissions?: string[];
 }
 
 const navItems: NavItem[] = [
-  {
-    label: 'Dashboard',
-    href: '/dashboard',
-    icon: '📊',
-    permissions: ['dashboard:read'],
-  },
-  {
-    label: 'Mi Perfil',
-    href: '/dashboard/profile',
-    icon: '👤',
-  },
-  {
-    label: 'Usuarios',
-    href: '/dashboard/users',
-    icon: '👥',
-    permissions: ['users:read'],
-  },
-  {
-    label: 'Roles',
-    href: '/dashboard/roles',
-    icon: '🎭',
-    permissions: ['roles:read'],
-  },
-  {
-    label: 'Permisos',
-    href: '/dashboard/permissions',
-    icon: '🔑',
-    permissions: ['permissions:read'],
-  },
+  { label: 'Dashboard',  href: '/dashboard',             icon: LayoutDashboard, permissions: ['dashboard:read'] },
+  { label: 'Mi Perfil',  href: '/dashboard/profile',     icon: User },
+  { label: 'Usuarios',   href: '/dashboard/users',       icon: Users,           permissions: ['users:read'] },
+  { label: 'Roles',      href: '/dashboard/roles',       icon: Shield,          permissions: ['roles:read'] },
+  { label: 'Permisos',   href: '/dashboard/permissions', icon: Key,             permissions: ['permissions:read'] },
 ];
 
 interface SidebarProps {
@@ -53,12 +39,14 @@ export default function Sidebar({ isOpen, onClose }: SidebarProps) {
   const pathname = usePathname();
   const { user, logout } = useAuth();
 
+  const initials = user?.username?.[0]?.toUpperCase() ?? '?';
+
   return (
     <>
-      {/* Overlay for mobile */}
+      {/* Overlay mobile */}
       {isOpen && (
         <div
-          className="fixed inset-0 bg-black bg-opacity-50 z-20 lg:hidden"
+          className="fixed inset-0 bg-black/40 backdrop-blur-sm z-20 lg:hidden"
           onClick={onClose}
         />
       )}
@@ -67,83 +55,84 @@ export default function Sidebar({ isOpen, onClose }: SidebarProps) {
       <aside
         className={`
           fixed lg:static inset-y-0 left-0 z-30
-          w-64 bg-white dark:bg-gray-800 border-r border-gray-200 dark:border-gray-700
+          w-64 flex flex-col
+          bg-white dark:bg-stone-900
+          border-r border-stone-200 dark:border-stone-800
           transform transition-transform duration-300 ease-in-out
           ${isOpen ? 'translate-x-0' : '-translate-x-full lg:translate-x-0'}
         `}
       >
-        <div className="flex flex-col h-full">
-          {/* Logo */}
-          <div className="flex items-center justify-between h-16 px-6 border-b border-gray-200 dark:border-gray-700">
-            <h1 className="text-xl font-bold text-gray-800 dark:text-gray-100">RBAC App</h1>
-            <button
-              onClick={onClose}
-              className="lg:hidden text-gray-600 dark:text-gray-300 hover:text-gray-800 dark:hover:text-gray-100"
-            >
-              ✕
-            </button>
-          </div>
-
-          {/* User info */}
-          <div className="px-6 py-4 border-b border-gray-200 dark:border-gray-700">
-            <div className="flex items-center space-x-3">
-              <div className="w-10 h-10 rounded-full bg-blue-500 dark:bg-blue-600 flex items-center justify-center text-white font-semibold">
-                {user?.username?.[0]?.toUpperCase()}
-              </div>
-              <div className="flex-1 min-w-0">
-                <p className="text-sm font-medium text-gray-800 dark:text-gray-100 truncate">
-                  {user?.full_name}
-                </p>
-                <p className="text-xs text-gray-500 dark:text-gray-400 truncate">{user?.email}</p>
-              </div>
+        {/* Logo */}
+        <div className="flex items-center justify-between h-14 px-5 border-b border-stone-200 dark:border-stone-800 shrink-0">
+          <div className="flex items-center gap-2">
+            <div className="w-7 h-7 rounded-md bg-stone-900 dark:bg-white flex items-center justify-center">
+              <Shield className="w-4 h-4 text-white dark:text-stone-900" />
             </div>
-            {user?.roles && user.roles.length > 0 && (
-              <div className="mt-2">
-                <span className="inline-block px-2 py-1 text-xs font-medium bg-blue-100 dark:bg-blue-900 text-blue-800 dark:text-blue-200 rounded">
-                  {user.roles[0].name}
-                </span>
-              </div>
-            )}
+            <span className="text-sm font-semibold text-stone-800 dark:text-stone-100 tracking-tight">
+              RBAC App
+            </span>
           </div>
+          <button
+            onClick={onClose}
+            className="lg:hidden p-1 rounded text-stone-400 hover:text-stone-600 dark:hover:text-stone-300 transition-colors"
+          >
+            <X className="w-4 h-4" />
+          </button>
+        </div>
 
-          {/* Navigation */}
-          <nav className="flex-1 px-4 py-4 space-y-1 overflow-y-auto">
-            {navItems.map((item) => (
+        {/* User info */}
+        <div className="px-4 py-3 border-b border-stone-200 dark:border-stone-800 shrink-0">
+          <div className="flex items-center gap-3">
+            <div className="w-8 h-8 rounded-full bg-blue-600 flex items-center justify-center text-white text-xs font-semibold shrink-0">
+              {initials}
+            </div>
+            <div className="flex-1 min-w-0">
+              <p className="text-sm font-medium text-stone-800 dark:text-stone-100 truncate leading-tight">
+                {user?.full_name || user?.username}
+              </p>
+              <p className="text-xs text-stone-400 dark:text-stone-500 truncate">
+                {user?.roles?.[0]?.name ?? 'Usuario'}
+              </p>
+            </div>
+          </div>
+        </div>
+
+        {/* Navigation */}
+        <nav className="flex-1 px-3 py-3 space-y-0.5 overflow-y-auto">
+          {navItems.map((item) => {
+            const isActive = pathname === item.href;
+            const Icon = item.icon;
+            return (
               <ProtectedComponent key={item.href} permissions={item.permissions}>
                 <Link
                   href={item.href}
+                  onClick={() => { if (window.innerWidth < 1024) onClose(); }}
                   className={`
-                    flex items-center space-x-3 px-4 py-3 rounded-lg
-                    transition-colors duration-200
-                    ${
-                      pathname === item.href
-                        ? 'bg-blue-50 dark:bg-blue-900 text-blue-600 dark:text-blue-200 font-medium'
-                        : 'text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700'
+                    flex items-center gap-3 px-3 py-2 rounded-md text-sm
+                    transition-colors duration-150
+                    ${isActive
+                      ? 'bg-stone-100 dark:bg-stone-800 text-stone-900 dark:text-stone-100 font-medium'
+                      : 'text-stone-500 dark:text-stone-400 hover:bg-stone-50 dark:hover:bg-stone-800/60 hover:text-stone-800 dark:hover:text-stone-200'
                     }
                   `}
-                  onClick={() => {
-                    if (window.innerWidth < 1024) {
-                      onClose();
-                    }
-                  }}
                 >
-                  <span className="text-xl">{item.icon}</span>
+                  <Icon className={`w-4 h-4 shrink-0 ${isActive ? 'text-stone-700 dark:text-stone-200' : ''}`} />
                   <span>{item.label}</span>
                 </Link>
               </ProtectedComponent>
-            ))}
-          </nav>
+            );
+          })}
+        </nav>
 
-          {/* Logout button */}
-          <div className="px-4 py-4 border-t border-gray-200 dark:border-gray-700">
-            <button
-              onClick={logout}
-              className="w-full flex items-center space-x-3 px-4 py-3 rounded-lg text-gray-700 dark:text-gray-300 hover:bg-red-50 dark:hover:bg-red-900 hover:text-red-600 dark:hover:text-red-200 transition-colors duration-200"
-            >
-              <span className="text-xl">🚪</span>
-              <span>Cerrar Sesión</span>
-            </button>
-          </div>
+        {/* Logout */}
+        <div className="px-3 py-3 border-t border-stone-200 dark:border-stone-800 shrink-0">
+          <button
+            onClick={logout}
+            className="w-full flex items-center gap-3 px-3 py-2 rounded-md text-sm text-stone-500 dark:text-stone-400 hover:bg-red-50 dark:hover:bg-red-950/40 hover:text-red-600 dark:hover:text-red-400 transition-colors duration-150"
+          >
+            <LogOut className="w-4 h-4 shrink-0" />
+            <span>Cerrar sesión</span>
+          </button>
         </div>
       </aside>
     </>

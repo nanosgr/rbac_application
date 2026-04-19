@@ -38,7 +38,7 @@ export default function ProfilePage() {
   }, [user]);
 
   if (!user) {
-    return <DashboardLayout title="Mi Perfil"><Card><p>Cargando...</p></Card></DashboardLayout>;
+    return <DashboardLayout title="Mi Perfil"><Card><p className="text-stone-500 dark:text-stone-400">Cargando...</p></Card></DashboardLayout>;
   }
 
   const handleProfileSubmit = async () => {
@@ -102,28 +102,30 @@ export default function ProfilePage() {
           actions={
             !isEditingProfile ? (
               <Button variant="secondary" size="sm" onClick={() => setIsEditingProfile(true)} className="flex items-center gap-2">
-                <Pencil className="w-4 h-4" />
+                <Pencil className="w-3.5 h-3.5" />
                 Editar
               </Button>
             ) : undefined
           }
         >
           {/* Avatar + resumen */}
-          <div className="flex items-center space-x-6 mb-6 pb-6 border-b border-gray-100">
-            <div className="w-20 h-20 rounded-full bg-blue-500 flex items-center justify-center text-white text-3xl font-bold flex-shrink-0">
+          <div className="flex items-center gap-5 mb-6 pb-6 border-b border-stone-100 dark:border-stone-800">
+            <div className="w-16 h-16 rounded-full bg-blue-600 flex items-center justify-center text-white text-2xl font-bold shrink-0">
               {user.username[0].toUpperCase()}
             </div>
             <div>
-              <h3 className="text-xl font-bold text-gray-900">{user.full_name || user.username}</h3>
-              <p className="text-gray-500 text-sm">@{user.username}</p>
+              <h3 className="text-lg font-semibold text-stone-900 dark:text-stone-100">
+                {user.full_name || user.username}
+              </h3>
+              <p className="text-sm text-stone-400 dark:text-stone-500">@{user.username}</p>
               <div className="flex gap-2 mt-2 flex-wrap">
                 {user.is_superuser && (
-                  <span className="px-2 py-1 bg-yellow-100 text-yellow-800 text-xs font-medium rounded-full flex items-center gap-1">
+                  <span className="px-2 py-1 bg-amber-100 dark:bg-amber-900/40 text-amber-800 dark:text-amber-300 text-xs font-medium rounded-full flex items-center gap-1">
                     <ShieldCheck className="w-3 h-3" /> Superusuario
                   </span>
                 )}
                 {user.roles.map((r) => (
-                  <span key={r.id} className="px-2 py-1 bg-purple-100 text-purple-800 text-xs font-medium rounded-full">
+                  <span key={r.id} className="px-2 py-1 bg-violet-100 dark:bg-violet-900/40 text-violet-800 dark:text-violet-300 text-xs font-medium rounded-full">
                     {r.name}
                   </span>
                 ))}
@@ -134,7 +136,9 @@ export default function ProfilePage() {
           {isEditingProfile ? (
             <div className="space-y-4">
               {profileError && (
-                <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg text-sm">{profileError}</div>
+                <div className="bg-red-50 dark:bg-red-950/40 border border-red-100 dark:border-red-900/50 text-red-600 dark:text-red-400 px-3 py-2.5 rounded-md text-xs">
+                  {profileError}
+                </div>
               )}
               <Input
                 label="Nombre Completo"
@@ -147,51 +151,53 @@ export default function ProfilePage() {
                 value={profileData.email ?? ''}
                 onChange={(e) => setProfileData({ ...profileData, email: e.target.value })}
               />
-              <div className="flex gap-3 pt-2">
-                <Button onClick={handleProfileSubmit} disabled={isSavingProfile} className="flex items-center gap-2">
-                  <Save className="w-4 h-4" />
+              <div className="flex gap-2 pt-1">
+                <Button onClick={handleProfileSubmit} disabled={isSavingProfile} size="sm" className="flex items-center gap-1.5">
+                  <Save className="w-3.5 h-3.5" />
                   {isSavingProfile ? 'Guardando...' : 'Guardar'}
                 </Button>
-                <Button variant="secondary" onClick={cancelEdit} className="flex items-center gap-2">
-                  <X className="w-4 h-4" />
+                <Button variant="secondary" onClick={cancelEdit} size="sm" className="flex items-center gap-1.5">
+                  <X className="w-3.5 h-3.5" />
                   Cancelar
                 </Button>
               </div>
             </div>
           ) : (
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-              <div>
-                <p className="text-xs font-medium text-gray-500 uppercase tracking-wide">Usuario</p>
-                <p className="mt-1 text-gray-900">{user.username}</p>
-              </div>
-              <div>
-                <p className="text-xs font-medium text-gray-500 uppercase tracking-wide">Nombre Completo</p>
-                <p className="mt-1 text-gray-900">{user.full_name || '—'}</p>
-              </div>
-              <div>
-                <p className="text-xs font-medium text-gray-500 uppercase tracking-wide">Email</p>
-                <p className="mt-1 text-gray-900">{user.email}</p>
-              </div>
-              <div>
-                <p className="text-xs font-medium text-gray-500 uppercase tracking-wide">Estado</p>
-                <span className={`mt-1 inline-block px-2 py-1 text-xs font-medium rounded-full ${user.is_active ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'}`}>
-                  {user.is_active ? 'Activo' : 'Inactivo'}
-                </span>
-              </div>
-              <div>
-                <p className="text-xs font-medium text-gray-500 uppercase tracking-wide">Miembro desde</p>
-                <p className="mt-1 text-gray-900">
-                  {user.created_at ? new Date(user.created_at).toLocaleDateString('es-ES', { year: 'numeric', month: 'long', day: 'numeric' }) : '—'}
-                </p>
-              </div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-5">
+              {[
+                { label: 'Usuario',         value: user.username },
+                { label: 'Nombre Completo', value: user.full_name || '—' },
+                { label: 'Email',           value: user.email },
+                { label: 'Estado',          value: null, isStatus: true },
+                { label: 'Miembro desde',   value: user.created_at
+                    ? new Date(user.created_at).toLocaleDateString('es-ES', { year: 'numeric', month: 'long', day: 'numeric' })
+                    : '—' },
+              ].map(({ label, value, isStatus }) => (
+                <div key={label}>
+                  <p className="text-xs font-medium text-stone-400 dark:text-stone-500 uppercase tracking-wider mb-1">
+                    {label}
+                  </p>
+                  {isStatus ? (
+                    <span className={`inline-block px-2 py-0.5 text-xs font-medium rounded-full ${
+                      user.is_active
+                        ? 'bg-emerald-100 dark:bg-emerald-900/40 text-emerald-700 dark:text-emerald-300'
+                        : 'bg-red-100 dark:bg-red-900/40 text-red-700 dark:text-red-300'
+                    }`}>
+                      {user.is_active ? 'Activo' : 'Inactivo'}
+                    </span>
+                  ) : (
+                    <p className="text-sm text-stone-800 dark:text-stone-200">{value}</p>
+                  )}
+                </div>
+              ))}
             </div>
           )}
         </Card>
 
         {/* Cambiar Contraseña */}
         <Card title="Cambiar Contraseña">
-          <div className="flex items-center gap-2 mb-5 text-gray-500">
-            <Lock className="w-4 h-4" />
+          <div className="flex items-center gap-2 mb-5 text-stone-400 dark:text-stone-500">
+            <Lock className="w-4 h-4 shrink-0" />
             <span className="text-sm">Debes ingresar tu contraseña actual para confirmar el cambio.</span>
           </div>
           <div className="space-y-4 max-w-md">
@@ -217,10 +223,12 @@ export default function ProfilePage() {
               placeholder="Repite la nueva contraseña"
             />
             {passwordError && (
-              <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg text-sm">{passwordError}</div>
+              <div className="bg-red-50 dark:bg-red-950/40 border border-red-100 dark:border-red-900/50 text-red-600 dark:text-red-400 px-3 py-2.5 rounded-md text-xs">
+                {passwordError}
+              </div>
             )}
-            <Button onClick={handlePasswordSubmit} disabled={isSavingPwd} className="flex items-center gap-2">
-              <Save className="w-4 h-4" />
+            <Button onClick={handlePasswordSubmit} disabled={isSavingPwd} size="sm" className="flex items-center gap-1.5">
+              <Save className="w-3.5 h-3.5" />
               {isSavingPwd ? 'Cambiando...' : 'Cambiar Contraseña'}
             </Button>
           </div>
@@ -230,32 +238,36 @@ export default function ProfilePage() {
         <Card title="Mis Roles y Permisos">
           <div className="space-y-6">
             <div>
-              <h3 className="text-sm font-semibold text-gray-700 mb-3">Roles Asignados</h3>
+              <h3 className="text-xs font-semibold text-stone-500 dark:text-stone-400 uppercase tracking-wider mb-3">
+                Roles Asignados
+              </h3>
               <div className="flex flex-wrap gap-2">
                 {user.roles.length > 0 ? (
                   user.roles.map((role) => (
-                    <span key={role.id} className="px-3 py-1 bg-purple-100 text-purple-800 text-sm rounded-lg font-medium">
+                    <span key={role.id} className="px-3 py-1 bg-violet-100 dark:bg-violet-900/40 text-violet-800 dark:text-violet-300 text-sm rounded-md font-medium">
                       {role.name}
                     </span>
                   ))
                 ) : (
-                  <p className="text-gray-500 text-sm">No tienes roles asignados</p>
+                  <p className="text-sm text-stone-400 dark:text-stone-500">No tienes roles asignados</p>
                 )}
               </div>
             </div>
             <div>
-              <h3 className="text-sm font-semibold text-gray-700 mb-3">
+              <h3 className="text-xs font-semibold text-stone-500 dark:text-stone-400 uppercase tracking-wider mb-3">
                 Permisos ({user.roles.reduce((acc, role) => acc + role.permissions.length, 0)} totales)
               </h3>
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
                 {user.roles.map((role) => (
-                  <div key={role.id} className="border border-gray-200 rounded-lg p-4">
-                    <h4 className="font-medium text-gray-800 mb-2">{role.name}</h4>
+                  <div key={role.id} className="border border-stone-200 dark:border-stone-700 rounded-md p-3">
+                    <h4 className="text-xs font-semibold text-stone-600 dark:text-stone-400 mb-2 uppercase tracking-wide">
+                      {role.name}
+                    </h4>
                     <div className="space-y-1">
                       {role.permissions.map((perm) => (
-                        <div key={perm.id} className="flex items-center space-x-2 text-sm">
-                          <span className="text-green-600 font-bold">✓</span>
-                          <span className="text-gray-700 font-mono text-xs">{perm.name}</span>
+                        <div key={perm.id} className="flex items-center gap-2 text-xs">
+                          <span className="text-emerald-500 font-bold leading-none">✓</span>
+                          <span className="text-stone-600 dark:text-stone-300 font-mono">{perm.name}</span>
                         </div>
                       ))}
                     </div>

@@ -147,7 +147,7 @@ export default function RolesPage() {
     {
       key: 'name',
       label: 'Nombre',
-      render: (role) => <span className="font-medium text-gray-900">{role.name}</span>,
+      render: (role) => <span className="font-medium text-stone-800 dark:text-stone-200">{role.name}</span>,
     },
     { key: 'description', label: 'Descripción' },
     {
@@ -243,25 +243,25 @@ export default function RolesPage() {
             required
           />
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Descripción</label>
+            <label className="block text-xs font-medium text-stone-600 dark:text-stone-400 mb-1.5">Descripción</label>
             <textarea
               value={formData.description}
               onChange={(e) => setFormData({ ...formData, description: e.target.value })}
-              className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+              className="w-full px-3 py-2 text-sm rounded-md border border-stone-200 dark:border-stone-700 bg-white dark:bg-stone-900 text-stone-900 dark:text-stone-100 placeholder:text-stone-400 dark:placeholder:text-stone-600 focus:outline-none focus:ring-2 focus:ring-blue-500/40 focus:border-blue-500 transition-colors"
               rows={3}
             />
           </div>
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-2">
+            <label className="block text-xs font-medium text-stone-600 dark:text-stone-400 mb-1.5">
               Permisos ({formData.permission_ids?.length ?? 0} seleccionados)
             </label>
-            <div className="border border-gray-300 rounded-lg p-4 max-h-72 overflow-y-auto">
+            <div className="border border-stone-200 dark:border-stone-700 rounded-md p-3 max-h-72 overflow-y-auto bg-white dark:bg-stone-900">
               {Object.entries(groupedPermissions).map(([resource, perms]) => (
                 <div key={resource} className="mb-4 last:mb-0">
-                  <h4 className="font-semibold text-gray-700 mb-2 uppercase text-xs tracking-wide">{resource}</h4>
-                  <div className="grid grid-cols-2 gap-2 ml-4">
+                  <h4 className="font-semibold text-stone-500 dark:text-stone-400 mb-2 uppercase text-xs tracking-wide">{resource}</h4>
+                  <div className="grid grid-cols-2 gap-2 ml-2">
                     {perms.map((perm) => (
-                      <label key={perm.id} className="flex items-center space-x-2 cursor-pointer">
+                      <label key={perm.id} className="flex items-center gap-2 cursor-pointer">
                         <input
                           type="checkbox"
                           checked={formData.permission_ids?.includes(perm.id)}
@@ -271,9 +271,9 @@ export default function RolesPage() {
                               : (formData.permission_ids ?? []).filter((id) => id !== perm.id);
                             setFormData({ ...formData, permission_ids: newIds });
                           }}
-                          className="rounded"
+                          className="rounded accent-blue-600"
                         />
-                        <span className="text-sm">{perm.action}</span>
+                        <span className="text-sm text-stone-700 dark:text-stone-300">{perm.action}</span>
                       </label>
                     ))}
                   </div>
@@ -281,14 +281,14 @@ export default function RolesPage() {
               ))}
             </div>
           </div>
-          <label className="flex items-center space-x-2 cursor-pointer">
+          <label className="flex items-center gap-2 cursor-pointer">
             <input
               type="checkbox"
               checked={formData.is_active}
               onChange={(e) => setFormData({ ...formData, is_active: e.target.checked })}
-              className="rounded"
+              className="rounded accent-blue-600"
             />
-            <span className="text-sm font-medium text-gray-700">Rol Activo</span>
+            <span className="text-sm font-medium text-stone-700 dark:text-stone-300">Rol Activo</span>
           </label>
         </div>
       </Modal>

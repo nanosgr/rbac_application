@@ -20,10 +20,7 @@ export default function Skeleton({
 
   return (
     <div
-      className={`
-        ${width} ${height} ${roundedClasses[rounded]}
-        bg-gray-200 animate-pulse ${className}
-      `}
+      className={`${width} ${height} ${roundedClasses[rounded]} bg-stone-200 dark:bg-stone-700 animate-pulse ${className}`}
     />
   );
 }

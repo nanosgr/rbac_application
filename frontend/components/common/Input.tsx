@@ -11,22 +11,31 @@ const Input = forwardRef<HTMLInputElement, InputProps>(
     return (
       <div className={fullWidth ? 'w-full' : ''}>
         {label && (
-          <label className="block text-sm font-medium text-gray-700 mb-1">
+          <label className="block text-xs font-medium text-stone-600 dark:text-stone-400 mb-1.5">
             {label}
           </label>
         )}
         <input
           ref={ref}
           className={`
-            px-4 py-2 border rounded-lg
-            focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent
-            ${error ? 'border-red-500' : 'border-gray-300'}
+            px-3 py-2 text-sm rounded-md border transition-colors duration-150
+            bg-white dark:bg-stone-900
+            text-stone-900 dark:text-stone-100
+            placeholder:text-stone-400 dark:placeholder:text-stone-600
+            focus:outline-none focus:ring-2 focus:ring-blue-500/40 focus:border-blue-500
+            disabled:opacity-50 disabled:cursor-not-allowed
+            ${error
+              ? 'border-red-400 dark:border-red-600'
+              : 'border-stone-200 dark:border-stone-700 hover:border-stone-300 dark:hover:border-stone-600'
+            }
             ${fullWidth ? 'w-full' : ''}
             ${className}
           `}
           {...props}
         />
-        {error && <p className="mt-1 text-sm text-red-600">{error}</p>}
+        {error && (
+          <p className="mt-1 text-xs text-red-500 dark:text-red-400">{error}</p>
+        )}
       </div>
     );
   }

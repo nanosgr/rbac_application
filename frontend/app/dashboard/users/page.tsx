@@ -157,8 +157,8 @@ export default function UsersPage() {
             {user.username[0].toUpperCase()}
           </div>
           <div>
-            <p className="font-medium text-gray-900">{user.username}</p>
-            <p className="text-xs text-gray-500">{user.email}</p>
+            <p className="font-medium text-stone-800 dark:text-stone-200">{user.username}</p>
+            <p className="text-xs text-stone-400">{user.email}</p>
           </div>
         </div>
       ),
@@ -284,10 +284,10 @@ export default function UsersPage() {
             required={!editingUser}
           />
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-2">Roles</label>
-            <div className="space-y-2 max-h-40 overflow-y-auto border border-gray-300 rounded-lg p-3">
+            <label className="block text-xs font-medium text-stone-600 dark:text-stone-400 mb-1.5">Roles</label>
+            <div className="space-y-2 max-h-40 overflow-y-auto border border-stone-200 dark:border-stone-700 rounded-md p-3 bg-white dark:bg-stone-900">
               {roles.map((role) => (
-                <label key={role.id} className="flex items-center space-x-2 cursor-pointer">
+                <label key={role.id} className="flex items-center gap-2 cursor-pointer">
                   <input
                     type="checkbox"
                     checked={formData.role_ids?.includes(role.id)}
@@ -297,21 +297,21 @@ export default function UsersPage() {
                         : (formData.role_ids ?? []).filter((id) => id !== role.id);
                       setFormData({ ...formData, role_ids: newIds });
                     }}
-                    className="rounded"
+                    className="rounded accent-blue-600"
                   />
-                  <span className="text-sm">{role.name}</span>
+                  <span className="text-sm text-stone-700 dark:text-stone-300">{role.name}</span>
                 </label>
               ))}
             </div>
           </div>
-          <label className="flex items-center space-x-2 cursor-pointer">
+          <label className="flex items-center gap-2 cursor-pointer">
             <input
               type="checkbox"
               checked={formData.is_active}
               onChange={(e) => setFormData({ ...formData, is_active: e.target.checked })}
-              className="rounded"
+              className="rounded accent-blue-600"
             />
-            <span className="text-sm font-medium text-gray-700">Usuario Activo</span>
+            <span className="text-sm font-medium text-stone-700 dark:text-stone-300">Usuario Activo</span>
           </label>
         </div>
       </Modal>
