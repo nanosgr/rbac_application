@@ -22,7 +22,7 @@ router = APIRouter()
 @router.get("/", response_model=PaginatedResponse[UserRead])
 def read_users(
     page: int = Query(default=1, ge=1),
-    size: int = Query(default=10, ge=1, le=100),
+    size: int = Query(default=10, ge=1, le=1000),
     search: Optional[str] = Query(default=None),
     is_active: Optional[bool] = Query(default=None),
     db: Session = Depends(get_db),
@@ -30,7 +30,8 @@ def read_users(
 ):
     total = user_service.count_users(db, search=search, is_active=is_active)
     items = user_service.get_users(db, skip=(page - 1) * size, limit=size, search=search, is_active=is_active)
-    return PaginatedResponse(items=items, total=total, page=page, size=size, pages=ceil(total / size) if total else 1)
+    user_reads = [UserRead.model_validate(u) for u in items]
+    return PaginatedResponse(items=user_reads, total=total, page=page, size=size, pages=ceil(total / size) if total else 1)
 
 
 @router.post("/", response_model=UserRead)

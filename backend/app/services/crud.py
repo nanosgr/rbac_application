@@ -1,4 +1,6 @@
 from sqlmodel import Session, select, func, or_
+from sqlalchemy import select as sa_select
+from sqlalchemy.orm import selectinload
 from typing import List, Optional
 from app.models.models import User, Role, Permission, UserCreate, UserUpdate, RoleCreate, RoleUpdate, PermissionCreate, PermissionUpdate
 from app.core.security import get_password_hash, verify_password
@@ -6,7 +8,8 @@ from app.core.security import get_password_hash, verify_password
 
 class UserService:
     def get_user(self, db: Session, user_id: int) -> Optional[User]:
-        return db.get(User, user_id)
+        stmt = sa_select(User).options(selectinload(User.roles).selectinload(Role.permissions)).where(User.id == user_id)
+        return db.execute(stmt).scalars().first()
 
     def get_user_by_username(self, db: Session, username: str) -> Optional[User]:
         return db.exec(select(User).where(User.username == username)).first()
@@ -15,16 +18,16 @@ class UserService:
         return db.exec(select(User).where(User.email == email)).first()
 
     def get_users(self, db: Session, skip: int = 0, limit: int = 100, search: Optional[str] = None, is_active: Optional[bool] = None) -> List[User]:
-        query = select(User)
+        stmt = sa_select(User).options(selectinload(User.roles).selectinload(Role.permissions))
         if search:
-            query = query.where(or_(
+            stmt = stmt.where(or_(
                 User.username.ilike(f"%{search}%"),
                 User.email.ilike(f"%{search}%"),
                 User.full_name.ilike(f"%{search}%"),
             ))
         if is_active is not None:
-            query = query.where(User.is_active == is_active)
-        return db.exec(query.offset(skip).limit(limit)).all()
+            stmt = stmt.where(User.is_active == is_active)
+        return list(db.execute(stmt.offset(skip).limit(limit)).scalars().unique().all())
 
     def count_users(self, db: Session, search: Optional[str] = None, is_active: Optional[bool] = None) -> int:
         query = select(func.count(User.id))
@@ -93,27 +96,27 @@ class UserService:
             roles = db.exec(select(Role).where(Role.id.in_(role_ids))).all()
             db_user.roles = roles
             db.commit()
-            db.refresh(db_user)
-        return db_user
+        return self.get_user(db, user_id)
 
 
 class RoleService:
     def get_role(self, db: Session, role_id: int) -> Optional[Role]:
-        return db.get(Role, role_id)
+        stmt = sa_select(Role).options(selectinload(Role.permissions)).where(Role.id == role_id)
+        return db.execute(stmt).scalars().first()
 
     def get_role_by_name(self, db: Session, name: str) -> Optional[Role]:
         return db.exec(select(Role).where(Role.name == name)).first()
 
     def get_roles(self, db: Session, skip: int = 0, limit: int = 100, search: Optional[str] = None, is_active: Optional[bool] = None) -> List[Role]:
-        query = select(Role)
+        stmt = sa_select(Role).options(selectinload(Role.permissions))
         if search:
-            query = query.where(or_(
+            stmt = stmt.where(or_(
                 Role.name.ilike(f"%{search}%"),
                 Role.description.ilike(f"%{search}%"),
             ))
         if is_active is not None:
-            query = query.where(Role.is_active == is_active)
-        return db.exec(query.offset(skip).limit(limit)).all()
+            stmt = stmt.where(Role.is_active == is_active)
+        return list(db.execute(stmt.offset(skip).limit(limit)).scalars().unique().all())
 
     def count_roles(self, db: Session, search: Optional[str] = None, is_active: Optional[bool] = None) -> int:
         query = select(func.count(Role.id))
@@ -157,8 +160,7 @@ class RoleService:
             permissions = db.exec(select(Permission).where(Permission.id.in_(permission_ids))).all()
             db_role.permissions = permissions
             db.commit()
-            db.refresh(db_role)
-        return db_role
+        return self.get_role(db, role_id)
 
 
 class PermissionService:

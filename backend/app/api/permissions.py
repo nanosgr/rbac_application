@@ -21,7 +21,7 @@ router = APIRouter()
 @router.get("/", response_model=PaginatedResponse[PermissionRead])
 def read_permissions(
     page: int = Query(default=1, ge=1),
-    size: int = Query(default=10, ge=1, le=100),
+    size: int = Query(default=10, ge=1, le=1000),
     search: Optional[str] = Query(default=None),
     is_active: Optional[bool] = Query(default=None),
     resource: Optional[str] = Query(default=None),

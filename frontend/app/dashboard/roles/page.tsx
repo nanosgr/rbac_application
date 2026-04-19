@@ -1,7 +1,6 @@
 'use client';
 
-import { useEffect, useState, useMemo } from 'react';
-import { useAuth } from '@/context/AuthContext';
+import { useEffect, useState, useMemo, useCallback } from 'react';
 import { useToast } from '@/context/ToastContext';
 import { useConfirm } from '@/lib/hooks/useConfirm';
 import { usePagination } from '@/lib/hooks/usePagination';
@@ -17,6 +16,7 @@ import SearchBar from '@/components/common/SearchBar';
 import FilterSelect from '@/components/common/FilterSelect';
 import Pagination from '@/components/common/Pagination';
 import { Role, Permission, CreateRoleDTO, UpdateRoleDTO, TableColumn, TableAction } from '@/types';
+import { ShieldPlus, Pencil, Trash2 } from 'lucide-react';
 
 export default function RolesPage() {
   const { success, error: showError } = useToast();
@@ -34,37 +34,30 @@ export default function RolesPage() {
     is_active: true,
     permission_ids: [],
   });
-  const [error, setError] = useState('');
+  const [formError, setFormError] = useState('');
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
-  useEffect(() => {
-    loadData();
-  }, []);
-
-  const loadData = async () => {
+  const loadData = useCallback(async () => {
     try {
-      const [rolesData, permissionsData] = await Promise.all([
-        roleService.getAll(),
-        permissionService.getAll(),
+      const [rolesRes, permsRes] = await Promise.all([
+        roleService.getAll({ size: 500 }),
+        permissionService.getAll({ size: 500, is_active: true }),
       ]);
-      setRoles(rolesData);
-      setPermissions(permissionsData);
-    } catch (error) {
-      console.error('Error loading data:', error);
+      setRoles(rolesRes.items);
+      setPermissions(permsRes.items);
+    } catch {
       showError('Error al cargar los datos');
     } finally {
       setIsLoading(false);
     }
-  };
+  }, [showError]);
+
+  useEffect(() => { loadData(); }, [loadData]);
 
   const handleCreate = () => {
     setEditingRole(null);
-    setFormData({
-      name: '',
-      description: '',
-      is_active: true,
-      permission_ids: [],
-    });
-    setError('');
+    setFormData({ name: '', description: '', is_active: true, permission_ids: [] });
+    setFormError('');
     setIsModalOpen(true);
   };
 
@@ -74,9 +67,9 @@ export default function RolesPage() {
       name: role.name,
       description: role.description,
       is_active: role.is_active,
-      permission_ids: role.permissions.map((p) => p.id),
+      permission_ids: (role.permissions ?? []).map((p) => p.id),
     });
-    setError('');
+    setFormError('');
     setIsModalOpen(true);
   };
 
@@ -88,86 +81,64 @@ export default function RolesPage() {
       cancelText: 'Cancelar',
       variant: 'danger',
     });
-
     if (!confirmed) return;
-
     try {
       await roleService.delete(role.id);
-      success(`Rol "${role.name}" eliminado exitosamente`);
+      success(`Rol "${role.name}" eliminado`);
       await loadData();
-    } catch (error) {
-      console.error('Error deleting role:', error);
+    } catch {
       showError('Error al eliminar el rol');
     }
   };
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setError('');
-
+  const handleSubmit = async () => {
+    setFormError('');
+    setIsSubmitting(true);
     try {
       if (editingRole) {
-        const updateData: UpdateRoleDTO = {
-          name: formData.name,
-          description: formData.description,
-          is_active: formData.is_active,
-        };
+        const updateData: UpdateRoleDTO = { name: formData.name, description: formData.description, is_active: formData.is_active };
         await roleService.update(editingRole.id, updateData);
-
-        if (formData.permission_ids && formData.permission_ids.length > 0) {
-          await roleService.assignPermissions(editingRole.id, formData.permission_ids);
-        }
+        await roleService.assignPermissions(editingRole.id, formData.permission_ids ?? []);
+        success('Rol actualizado');
       } else {
-        await roleService.create(formData);
+        const { permission_ids, ...createPayload } = formData;
+        const newRole = await roleService.create(createPayload);
+        if (permission_ids && permission_ids.length > 0) {
+          await roleService.assignPermissions(newRole.id, permission_ids);
+        }
+        success('Rol creado');
       }
-
       setIsModalOpen(false);
-      success(editingRole ? 'Rol actualizado exitosamente' : 'Rol creado exitosamente');
       await loadData();
-    } catch (error) {
-      console.error('Error saving role:', error);
-      setError(error instanceof Error ? error.message : 'Error al guardar el rol');
+    } catch (err) {
+      setFormError(err instanceof Error ? err.message : 'Error al guardar el rol');
+    } finally {
+      setIsSubmitting(false);
     }
   };
 
-  // Filtered roles based on search and filters
   const filteredRoles = useMemo(() => {
     return roles.filter((role) => {
       const matchesSearch =
         searchQuery === '' ||
         role.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
         role.description.toLowerCase().includes(searchQuery.toLowerCase());
-
       const matchesStatus =
         statusFilter === 'all' ||
         (statusFilter === 'active' && role.is_active) ||
         (statusFilter === 'inactive' && !role.is_active);
-
       return matchesSearch && matchesStatus;
     });
   }, [roles, searchQuery, statusFilter]);
 
-  // Pagination
   const {
-    currentPage,
-    totalPages,
-    currentData: paginatedRoles,
-    itemsPerPage,
-    startIndex,
-    endIndex,
-    goToPage,
-    nextPage,
-    previousPage,
-    goToFirstPage,
-    goToLastPage,
-    setItemsPerPage,
+    currentPage, totalPages, currentData: paginatedRoles,
+    itemsPerPage, startIndex, endIndex,
+    goToPage, nextPage, previousPage, goToFirstPage, goToLastPage, setItemsPerPage,
   } = usePagination({ data: filteredRoles, itemsPerPage: 10 });
 
-  // Group permissions by resource
   const groupedPermissions = permissions.reduce((acc, perm) => {
-    if (!acc[perm.resource]) {
-      acc[perm.resource] = [];
-    }
+    if (!acc[perm.resource]) acc[perm.resource] = [];
     acc[perm.resource].push(perm);
     return acc;
   }, {} as Record<string, Permission[]>);
@@ -176,35 +147,23 @@ export default function RolesPage() {
     {
       key: 'name',
       label: 'Nombre',
-      render: (role) => (
-        <div className="flex items-center space-x-2">
-          <span className="text-2xl">🎭</span>
-          <span className="font-medium">{role.name}</span>
-        </div>
-      ),
+      render: (role) => <span className="font-medium text-gray-900">{role.name}</span>,
     },
-    {
-      key: 'description',
-      label: 'Descripción',
-    },
+    { key: 'description', label: 'Descripción' },
     {
       key: 'permissions',
       label: 'Permisos',
       render: (role) => (
-        <span className="text-gray-600">{role.permissions.length} permisos</span>
+        <span className="px-2 py-1 bg-blue-100 text-blue-800 text-xs font-medium rounded-full">
+          {(role.permissions ?? []).length} permisos
+        </span>
       ),
     },
     {
       key: 'is_active',
       label: 'Estado',
       render: (role) => (
-        <span
-          className={`px-2 py-1 text-xs font-medium rounded ${
-            role.is_active
-              ? 'bg-green-100 text-green-800'
-              : 'bg-red-100 text-red-800'
-          }`}
-        >
+        <span className={`px-2 py-1 text-xs font-medium rounded ${role.is_active ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'}`}>
           {role.is_active ? 'Activo' : 'Inactivo'}
         </span>
       ),
@@ -212,20 +171,8 @@ export default function RolesPage() {
   ];
 
   const actions: TableAction<Role>[] = [
-    {
-      label: 'Editar',
-      onClick: handleEdit,
-      variant: 'secondary',
-      permission: 'roles:update',
-      icon: '✏️',
-    },
-    {
-      label: 'Eliminar',
-      onClick: handleDelete,
-      variant: 'danger',
-      permission: 'roles:delete',
-      icon: '🗑️',
-    },
+    { label: 'Editar', onClick: handleEdit, variant: 'secondary', permission: 'roles:update', icon: <Pencil className="w-3 h-3" /> },
+    { label: 'Eliminar', onClick: handleDelete, variant: 'danger', permission: 'roles:delete', icon: <Trash2 className="w-3 h-3" /> },
   ];
 
   return (
@@ -234,17 +181,16 @@ export default function RolesPage() {
         title="Roles del Sistema"
         actions={
           <ProtectedComponent permissions={['roles:create']}>
-            <Button onClick={handleCreate}>+ Nuevo Rol</Button>
+            <Button onClick={handleCreate} className="flex items-center gap-2">
+              <ShieldPlus className="w-4 h-4" />
+              Nuevo Rol
+            </Button>
           </ProtectedComponent>
         }
       >
-        {/* Search and Filters */}
         <div className="mb-6 flex flex-col sm:flex-row gap-4">
           <div className="flex-1">
-            <SearchBar
-              placeholder="Buscar por nombre o descripción..."
-              onSearch={setSearchQuery}
-            />
+            <SearchBar placeholder="Buscar por nombre o descripción..." onSearch={setSearchQuery} />
           </div>
           <FilterSelect
             label="Estado"
@@ -258,34 +204,20 @@ export default function RolesPage() {
           />
         </div>
 
-        <Table
-          data={paginatedRoles}
-          columns={columns}
-          actions={actions}
-          isLoading={isLoading}
-          emptyMessage="No se encontraron roles"
-        />
+        <Table data={paginatedRoles} columns={columns} actions={actions} isLoading={isLoading} emptyMessage="No se encontraron roles" />
 
-        {/* Pagination */}
         {filteredRoles.length > 0 && (
           <Pagination
-            currentPage={currentPage}
-            totalPages={totalPages}
-            onPageChange={goToPage}
-            onFirstPage={goToFirstPage}
-            onLastPage={goToLastPage}
-            onPreviousPage={previousPage}
-            onNextPage={nextPage}
-            startIndex={startIndex}
-            endIndex={endIndex}
-            totalItems={filteredRoles.length}
-            itemsPerPage={itemsPerPage}
+            currentPage={currentPage} totalPages={totalPages}
+            onPageChange={goToPage} onFirstPage={goToFirstPage} onLastPage={goToLastPage}
+            onPreviousPage={previousPage} onNextPage={nextPage}
+            startIndex={startIndex} endIndex={endIndex}
+            totalItems={filteredRoles.length} itemsPerPage={itemsPerPage}
             onItemsPerPageChange={setItemsPerPage}
           />
         )}
       </Card>
 
-      {/* Modal Create/Edit */}
       <Modal
         isOpen={isModalOpen}
         onClose={() => setIsModalOpen(false)}
@@ -293,63 +225,51 @@ export default function RolesPage() {
         size="lg"
         footer={
           <>
-            <Button variant="secondary" onClick={() => setIsModalOpen(false)}>
-              Cancelar
-            </Button>
-            <Button onClick={handleSubmit}>
-              {editingRole ? 'Actualizar' : 'Crear'}
+            <Button variant="secondary" onClick={() => setIsModalOpen(false)}>Cancelar</Button>
+            <Button onClick={handleSubmit} disabled={isSubmitting}>
+              {isSubmitting ? 'Guardando...' : editingRole ? 'Actualizar' : 'Crear'}
             </Button>
           </>
         }
       >
-        <form onSubmit={handleSubmit} className="space-y-4">
-          {error && (
-            <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg text-sm">
-              {error}
-            </div>
+        <div className="space-y-4">
+          {formError && (
+            <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg text-sm">{formError}</div>
           )}
-
           <Input
-            label="Nombre"
+            label="Nombre *"
             value={formData.name}
             onChange={(e) => setFormData({ ...formData, name: e.target.value })}
             required
           />
-
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">
-              Descripción
-            </label>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Descripción</label>
             <textarea
               value={formData.description}
               onChange={(e) => setFormData({ ...formData, description: e.target.value })}
               className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
               rows={3}
-              required
             />
           </div>
-
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-2">
-              Permisos ({formData.permission_ids?.length || 0} seleccionados)
+              Permisos ({formData.permission_ids?.length ?? 0} seleccionados)
             </label>
-            <div className="border border-gray-300 rounded-lg p-4 max-h-96 overflow-y-auto">
+            <div className="border border-gray-300 rounded-lg p-4 max-h-72 overflow-y-auto">
               {Object.entries(groupedPermissions).map(([resource, perms]) => (
                 <div key={resource} className="mb-4 last:mb-0">
-                  <h4 className="font-semibold text-gray-800 mb-2 capitalize">
-                    {resource}
-                  </h4>
+                  <h4 className="font-semibold text-gray-700 mb-2 uppercase text-xs tracking-wide">{resource}</h4>
                   <div className="grid grid-cols-2 gap-2 ml-4">
                     {perms.map((perm) => (
-                      <label key={perm.id} className="flex items-center space-x-2">
+                      <label key={perm.id} className="flex items-center space-x-2 cursor-pointer">
                         <input
                           type="checkbox"
                           checked={formData.permission_ids?.includes(perm.id)}
                           onChange={(e) => {
-                            const newPermIds = e.target.checked
-                              ? [...(formData.permission_ids || []), perm.id]
-                              : (formData.permission_ids || []).filter((id) => id !== perm.id);
-                            setFormData({ ...formData, permission_ids: newPermIds });
+                            const newIds = e.target.checked
+                              ? [...(formData.permission_ids ?? []), perm.id]
+                              : (formData.permission_ids ?? []).filter((id) => id !== perm.id);
+                            setFormData({ ...formData, permission_ids: newIds });
                           }}
                           className="rounded"
                         />
@@ -361,8 +281,7 @@ export default function RolesPage() {
               ))}
             </div>
           </div>
-
-          <label className="flex items-center space-x-2">
+          <label className="flex items-center space-x-2 cursor-pointer">
             <input
               type="checkbox"
               checked={formData.is_active}
@@ -371,10 +290,9 @@ export default function RolesPage() {
             />
             <span className="text-sm font-medium text-gray-700">Rol Activo</span>
           </label>
-        </form>
+        </div>
       </Modal>
 
-      {/* Confirmation Dialog */}
       <ConfirmationDialog />
     </DashboardLayout>
   );

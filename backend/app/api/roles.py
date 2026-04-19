@@ -21,7 +21,7 @@ router = APIRouter()
 @router.get("/", response_model=PaginatedResponse[RoleRead])
 def read_roles(
     page: int = Query(default=1, ge=1),
-    size: int = Query(default=10, ge=1, le=100),
+    size: int = Query(default=10, ge=1, le=1000),
     search: Optional[str] = Query(default=None),
     is_active: Optional[bool] = Query(default=None),
     db: Session = Depends(get_db),
@@ -29,7 +29,8 @@ def read_roles(
 ):
     total = role_service.count_roles(db, search=search, is_active=is_active)
     items = role_service.get_roles(db, skip=(page - 1) * size, limit=size, search=search, is_active=is_active)
-    return PaginatedResponse(items=items, total=total, page=page, size=size, pages=ceil(total / size) if total else 1)
+    role_reads = [RoleRead.model_validate(r) for r in items]
+    return PaginatedResponse(items=role_reads, total=total, page=page, size=size, pages=ceil(total / size) if total else 1)
 
 
 @router.post("/", response_model=RoleRead)

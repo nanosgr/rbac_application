@@ -56,7 +56,7 @@ class Permission(PermissionBase, table=True):
         default=None,
         sa_column=Column(DateTime(timezone=True), onupdate=func.now(), nullable=True),
     )
-    roles: List["Role"] = Relationship(back_populates="permissions", link_model=RolePermissionLink)
+    roles: List["Role"] = Relationship(back_populates="permissions", link_model=RolePermissionLink, sa_relationship_kwargs={"lazy": "selectin"})
 
 
 class PermissionCreate(PermissionBase):
@@ -99,8 +99,8 @@ class Role(RoleBase, table=True):
         default=None,
         sa_column=Column(DateTime(timezone=True), onupdate=func.now(), nullable=True),
     )
-    users: List["User"] = Relationship(back_populates="roles", link_model=UserRoleLink)
-    permissions: List[Permission] = Relationship(back_populates="roles", link_model=RolePermissionLink)
+    users: List["User"] = Relationship(back_populates="roles", link_model=UserRoleLink, sa_relationship_kwargs={"lazy": "selectin"})
+    permissions: List[Permission] = Relationship(back_populates="roles", link_model=RolePermissionLink, sa_relationship_kwargs={"lazy": "selectin"})
 
 
 class RoleCreate(RoleBase):
@@ -145,7 +145,7 @@ class User(UserBase, table=True):
         default=None,
         sa_column=Column(DateTime(timezone=True), onupdate=func.now(), nullable=True),
     )
-    roles: List[Role] = Relationship(back_populates="users", link_model=UserRoleLink)
+    roles: List[Role] = Relationship(back_populates="users", link_model=UserRoleLink, sa_relationship_kwargs={"lazy": "selectin"})
 
 
 class UserCreate(UserBase):

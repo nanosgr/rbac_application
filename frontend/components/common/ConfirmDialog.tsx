@@ -53,7 +53,7 @@ export default function ConfirmDialog({
             {cancelText}
           </Button>
           <Button
-            variant={variant}
+            variant={variant === 'danger' ? 'danger' : 'primary'}
             onClick={handleConfirm}
           >
             {confirmText}

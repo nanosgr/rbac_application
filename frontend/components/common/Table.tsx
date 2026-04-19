@@ -57,7 +57,7 @@ export default function Table<T extends { id: number | string }>({
                 <td key={colIndex} className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
                   {column.render
                     ? column.render(item)
-                    : String((item as any)[column.key] ?? '')}
+                    : String((item as Record<string, unknown>)[column.key as string] ?? '')}
                 </td>
               ))}
               {actions.length > 0 && (
@@ -72,9 +72,10 @@ export default function Table<T extends { id: number | string }>({
                           size="sm"
                           variant={action.variant || 'secondary'}
                           onClick={() => action.onClick(item)}
+                          title={action.label}
+                          className="!px-2"
                         >
-                          {action.icon && <span className="mr-1">{action.icon}</span>}
-                          {action.label}
+                          {action.icon ?? action.label}
                         </Button>
                       </ProtectedComponent>
                     ))}

@@ -34,6 +34,19 @@ export interface Permission {
   updated_at?: string;
 }
 
+// AuditLog types
+export interface AuditLog {
+  id: number;
+  user_id: number | null;
+  username: string | null;
+  action: string;
+  resource: string;
+  resource_id: number | null;
+  details: string | null;
+  ip_address: string | null;
+  timestamp: string | null;
+}
+
 // Auth types
 export interface LoginCredentials {
   username: string;
@@ -42,6 +55,7 @@ export interface LoginCredentials {
 
 export interface AuthResponse {
   access_token: string;
+  refresh_token: string;
   token_type: string;
 }
 
@@ -71,7 +85,7 @@ export interface PaginatedResponse<T> {
   pages: number;
 }
 
-// CRUD types
+// CRUD DTOs
 export interface CreateUserDTO {
   username: string;
   email: string;
@@ -86,6 +100,16 @@ export interface UpdateUserDTO {
   full_name?: string;
   is_active?: boolean;
   password?: string;
+}
+
+export interface UpdateProfileDTO {
+  email?: string;
+  full_name?: string;
+}
+
+export interface ChangePasswordDTO {
+  current_password: string;
+  new_password: string;
 }
 
 export interface CreateRoleDTO {
@@ -112,6 +136,30 @@ export interface CreatePermissionDTO {
 export interface UpdatePermissionDTO {
   name?: string;
   description?: string;
+  is_active?: boolean;
+}
+
+// Query param types
+export interface GetUsersParams {
+  page?: number;
+  size?: number;
+  search?: string;
+  is_active?: boolean;
+}
+
+export interface GetRolesParams {
+  page?: number;
+  size?: number;
+  search?: string;
+  is_active?: boolean;
+}
+
+export interface GetPermissionsParams {
+  page?: number;
+  size?: number;
+  search?: string;
+  resource?: string;
+  action?: string;
   is_active?: boolean;
 }
 
