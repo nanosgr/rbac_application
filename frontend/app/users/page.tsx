@@ -1,10 +1,12 @@
 'use client';
 
-import { useEffect, useState, useMemo, useCallback } from 'react';
+import { useEffect, useState, useCallback } from 'react';
 import { useToast } from '@/context/ToastContext';
 import { useConfirm } from '@/lib/hooks/useConfirm';
 import { usePagination } from '@/lib/hooks/usePagination';
+import { useFilteredData } from '@/lib/hooks/useFilteredData';
 import { userService, roleService } from '@/lib/api/services';
+import { STATUS_FILTER_OPTIONS } from '@/lib/constants';
 import DashboardLayout from '@/components/layout/DashboardLayout';
 import Card from '@/components/common/Card';
 import Table from '@/components/common/Table';
@@ -15,8 +17,13 @@ import ProtectedComponent from '@/components/common/ProtectedComponent';
 import SearchBar from '@/components/common/SearchBar';
 import FilterSelect from '@/components/common/FilterSelect';
 import Pagination from '@/components/common/Pagination';
+import UserAvatar from '@/components/common/UserAvatar';
+import ErrorAlert from '@/components/common/ErrorAlert';
+import ModalFooter from '@/components/common/ModalFooter';
 import { User, Role, CreateUserDTO, UpdateUserDTO, TableColumn, TableAction } from '@/types';
 import { UserPlus, Pencil, Trash2 } from 'lucide-react';
+
+const USER_SEARCH_FIELDS = ['username', 'email', 'full_name'];
 
 export default function UsersPage() {
   const { success, error: showError } = useToast();
@@ -126,20 +133,12 @@ export default function UsersPage() {
     }
   };
 
-  const filteredUsers = useMemo(() => {
-    return users.filter((user) => {
-      const matchesSearch =
-        searchQuery === '' ||
-        user.username.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        user.email.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        user.full_name.toLowerCase().includes(searchQuery.toLowerCase());
-      const matchesStatus =
-        statusFilter === 'all' ||
-        (statusFilter === 'active' && user.is_active) ||
-        (statusFilter === 'inactive' && !user.is_active);
-      return matchesSearch && matchesStatus;
-    });
-  }, [users, searchQuery, statusFilter]);
+  const filteredUsers = useFilteredData({
+    data: users,
+    searchQuery,
+    searchFields: USER_SEARCH_FIELDS,
+    statusFilter,
+  });
 
   const {
     currentPage, totalPages, currentData: paginatedUsers,
@@ -153,9 +152,7 @@ export default function UsersPage() {
       label: 'Usuario',
       render: (user) => (
         <div className="flex items-center space-x-3">
-          <div className="w-8 h-8 rounded-full bg-blue-500 flex items-center justify-center text-white font-semibold text-sm">
-            {user.username[0].toUpperCase()}
-          </div>
+          <UserAvatar initial={user.username[0].toUpperCase()} size="md" />
           <div>
             <p className="font-medium text-stone-800 dark:text-stone-200">{user.username}</p>
             <p className="text-xs text-stone-400">{user.email}</p>
@@ -214,16 +211,7 @@ export default function UsersPage() {
           <div className="flex-1">
             <SearchBar placeholder="Buscar por usuario, email o nombre..." onSearch={setSearchQuery} />
           </div>
-          <FilterSelect
-            label="Estado"
-            value={statusFilter}
-            onChange={setStatusFilter}
-            options={[
-              { value: 'all', label: 'Todos' },
-              { value: 'active', label: 'Activos' },
-              { value: 'inactive', label: 'Inactivos' },
-            ]}
-          />
+          <FilterSelect label="Estado" value={statusFilter} onChange={setStatusFilter} options={STATUS_FILTER_OPTIONS} />
         </div>
 
         <Table data={paginatedUsers} columns={columns} actions={actions} isLoading={isLoading} emptyMessage="No se encontraron usuarios" />
@@ -245,18 +233,16 @@ export default function UsersPage() {
         onClose={() => setIsModalOpen(false)}
         title={editingUser ? 'Editar Usuario' : 'Crear Usuario'}
         footer={
-          <>
-            <Button variant="secondary" onClick={() => setIsModalOpen(false)}>Cancelar</Button>
-            <Button onClick={handleSubmit} disabled={isSubmitting}>
-              {isSubmitting ? 'Guardando...' : editingUser ? 'Actualizar' : 'Crear'}
-            </Button>
-          </>
+          <ModalFooter
+            onCancel={() => setIsModalOpen(false)}
+            onSubmit={handleSubmit}
+            isSubmitting={isSubmitting}
+            isEditing={!!editingUser}
+          />
         }
       >
         <div className="space-y-4">
-          {formError && (
-            <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg text-sm">{formError}</div>
-          )}
+          <ErrorAlert message={formError} />
           <Input
             label="Usuario"
             value={formData.username}

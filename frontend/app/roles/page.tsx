@@ -1,10 +1,12 @@
 'use client';
 
-import { useEffect, useState, useMemo, useCallback } from 'react';
+import { useEffect, useState, useCallback } from 'react';
 import { useToast } from '@/context/ToastContext';
 import { useConfirm } from '@/lib/hooks/useConfirm';
 import { usePagination } from '@/lib/hooks/usePagination';
+import { useFilteredData } from '@/lib/hooks/useFilteredData';
 import { roleService, permissionService } from '@/lib/api/services';
+import { STATUS_FILTER_OPTIONS } from '@/lib/constants';
 import DashboardLayout from '@/components/layout/DashboardLayout';
 import Card from '@/components/common/Card';
 import Table from '@/components/common/Table';
@@ -15,8 +17,12 @@ import ProtectedComponent from '@/components/common/ProtectedComponent';
 import SearchBar from '@/components/common/SearchBar';
 import FilterSelect from '@/components/common/FilterSelect';
 import Pagination from '@/components/common/Pagination';
+import ErrorAlert from '@/components/common/ErrorAlert';
+import ModalFooter from '@/components/common/ModalFooter';
 import { Role, Permission, CreateRoleDTO, UpdateRoleDTO, TableColumn, TableAction } from '@/types';
 import { ShieldPlus, Pencil, Trash2 } from 'lucide-react';
+
+const ROLE_SEARCH_FIELDS = ['name', 'description'];
 
 export default function RolesPage() {
   const { success, error: showError } = useToast();
@@ -117,19 +123,12 @@ export default function RolesPage() {
     }
   };
 
-  const filteredRoles = useMemo(() => {
-    return roles.filter((role) => {
-      const matchesSearch =
-        searchQuery === '' ||
-        role.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        role.description.toLowerCase().includes(searchQuery.toLowerCase());
-      const matchesStatus =
-        statusFilter === 'all' ||
-        (statusFilter === 'active' && role.is_active) ||
-        (statusFilter === 'inactive' && !role.is_active);
-      return matchesSearch && matchesStatus;
-    });
-  }, [roles, searchQuery, statusFilter]);
+  const filteredRoles = useFilteredData({
+    data: roles,
+    searchQuery,
+    searchFields: ROLE_SEARCH_FIELDS,
+    statusFilter,
+  });
 
   const {
     currentPage, totalPages, currentData: paginatedRoles,
@@ -192,16 +191,7 @@ export default function RolesPage() {
           <div className="flex-1">
             <SearchBar placeholder="Buscar por nombre o descripción..." onSearch={setSearchQuery} />
           </div>
-          <FilterSelect
-            label="Estado"
-            value={statusFilter}
-            onChange={setStatusFilter}
-            options={[
-              { value: 'all', label: 'Todos' },
-              { value: 'active', label: 'Activos' },
-              { value: 'inactive', label: 'Inactivos' },
-            ]}
-          />
+          <FilterSelect label="Estado" value={statusFilter} onChange={setStatusFilter} options={STATUS_FILTER_OPTIONS} />
         </div>
 
         <Table data={paginatedRoles} columns={columns} actions={actions} isLoading={isLoading} emptyMessage="No se encontraron roles" />
@@ -224,18 +214,16 @@ export default function RolesPage() {
         title={editingRole ? 'Editar Rol' : 'Crear Rol'}
         size="lg"
         footer={
-          <>
-            <Button variant="secondary" onClick={() => setIsModalOpen(false)}>Cancelar</Button>
-            <Button onClick={handleSubmit} disabled={isSubmitting}>
-              {isSubmitting ? 'Guardando...' : editingRole ? 'Actualizar' : 'Crear'}
-            </Button>
-          </>
+          <ModalFooter
+            onCancel={() => setIsModalOpen(false)}
+            onSubmit={handleSubmit}
+            isSubmitting={isSubmitting}
+            isEditing={!!editingRole}
+          />
         }
       >
         <div className="space-y-4">
-          {formError && (
-            <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg text-sm">{formError}</div>
-          )}
+          <ErrorAlert message={formError} />
           <Input
             label="Nombre *"
             value={formData.name}

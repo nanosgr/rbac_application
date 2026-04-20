@@ -2,6 +2,7 @@
 
 import { useAuth } from '@/context/AuthContext';
 import ThemeToggle from '@/components/common/ThemeToggle';
+import UserAvatar from '@/components/common/UserAvatar';
 import { Menu } from 'lucide-react';
 
 interface HeaderProps {
@@ -29,9 +30,7 @@ export default function Header({ onMenuClick, title = 'Dashboard' }: HeaderProps
         <ThemeToggle />
 
         <div className="hidden sm:flex items-center gap-2 pl-2 border-l border-stone-200 dark:border-stone-800 ml-1">
-          <div className="w-7 h-7 rounded-full bg-blue-600 flex items-center justify-center text-white text-xs font-semibold">
-            {user?.username?.[0]?.toUpperCase()}
-          </div>
+          <UserAvatar initial={user?.username?.[0]?.toUpperCase() ?? '?'} size="xs" />
           <div className="hidden md:block text-right">
             <p className="text-xs font-medium text-stone-700 dark:text-stone-200 leading-tight">{user?.full_name}</p>
             <p className="text-xs text-stone-400 dark:text-stone-500">{user?.roles?.[0]?.name ?? 'Usuario'}</p>

@@ -1,10 +1,12 @@
 'use client';
 
-import { useEffect, useState, useMemo, useCallback } from 'react';
+import { useEffect, useState, useCallback } from 'react';
 import { useToast } from '@/context/ToastContext';
 import { useConfirm } from '@/lib/hooks/useConfirm';
 import { usePagination } from '@/lib/hooks/usePagination';
+import { useFilteredData } from '@/lib/hooks/useFilteredData';
 import { permissionService } from '@/lib/api/services';
+import { STATUS_FILTER_OPTIONS } from '@/lib/constants';
 import DashboardLayout from '@/components/layout/DashboardLayout';
 import Card from '@/components/common/Card';
 import Table from '@/components/common/Table';
@@ -15,8 +17,12 @@ import ProtectedComponent from '@/components/common/ProtectedComponent';
 import SearchBar from '@/components/common/SearchBar';
 import FilterSelect from '@/components/common/FilterSelect';
 import Pagination from '@/components/common/Pagination';
+import ErrorAlert from '@/components/common/ErrorAlert';
+import ModalFooter from '@/components/common/ModalFooter';
 import { Permission, CreatePermissionDTO, UpdatePermissionDTO, TableColumn, TableAction } from '@/types';
 import { KeyRound, Pencil, Trash2 } from 'lucide-react';
+
+const PERMISSION_SEARCH_FIELDS = ['name', 'description', 'resource', 'action'];
 
 export default function PermissionsPage() {
   const { success, error: showError } = useToast();
@@ -133,22 +139,18 @@ export default function PermissionsPage() {
     }
   };
 
-  const filteredPermissions = useMemo(() => {
-    return permissions.filter((perm) => {
-      const matchesSearch =
-        searchQuery === '' ||
-        perm.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        perm.description.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        perm.resource.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        perm.action.toLowerCase().includes(searchQuery.toLowerCase());
-      const matchesStatus =
-        statusFilter === 'all' ||
-        (statusFilter === 'active' && perm.is_active) ||
-        (statusFilter === 'inactive' && !perm.is_active);
-      const matchesResource = resourceFilter === '' || perm.resource === resourceFilter;
-      return matchesSearch && matchesStatus && matchesResource;
-    });
-  }, [permissions, searchQuery, statusFilter, resourceFilter]);
+  const resourceExtraFilter = useCallback(
+    (perm: Permission) => resourceFilter === '' || perm.resource === resourceFilter,
+    [resourceFilter]
+  );
+
+  const filteredPermissions = useFilteredData({
+    data: permissions,
+    searchQuery,
+    searchFields: PERMISSION_SEARCH_FIELDS,
+    statusFilter,
+    extraFilter: resourceFilter !== '' ? resourceExtraFilter : undefined,
+  });
 
   const {
     currentPage, totalPages, currentData: paginatedPermissions,
@@ -212,16 +214,7 @@ export default function PermissionsPage() {
             <SearchBar placeholder="Buscar por nombre, recurso o acción..." onSearch={setSearchQuery} />
           </div>
           <FilterSelect label="Recurso" value={resourceFilter} onChange={setResourceFilter} options={resourceFilterOptions} />
-          <FilterSelect
-            label="Estado"
-            value={statusFilter}
-            onChange={setStatusFilter}
-            options={[
-              { value: 'all', label: 'Todos' },
-              { value: 'active', label: 'Activos' },
-              { value: 'inactive', label: 'Inactivos' },
-            ]}
-          />
+          <FilterSelect label="Estado" value={statusFilter} onChange={setStatusFilter} options={STATUS_FILTER_OPTIONS} />
         </div>
 
         <Table data={paginatedPermissions} columns={columns} actions={actions} isLoading={isLoading} emptyMessage="No se encontraron permisos" />
@@ -243,18 +236,16 @@ export default function PermissionsPage() {
         onClose={() => setIsModalOpen(false)}
         title={editingPermission ? 'Editar Permiso' : 'Crear Permiso'}
         footer={
-          <>
-            <Button variant="secondary" onClick={() => setIsModalOpen(false)}>Cancelar</Button>
-            <Button onClick={handleSubmit} disabled={isSubmitting}>
-              {isSubmitting ? 'Guardando...' : editingPermission ? 'Actualizar' : 'Crear'}
-            </Button>
-          </>
+          <ModalFooter
+            onCancel={() => setIsModalOpen(false)}
+            onSubmit={handleSubmit}
+            isSubmitting={isSubmitting}
+            isEditing={!!editingPermission}
+          />
         }
       >
         <div className="space-y-4">
-          {formError && (
-            <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg text-sm">{formError}</div>
-          )}
+          <ErrorAlert message={formError} />
           {editingPermission ? (
             <div className="flex gap-2 p-3 bg-stone-50 dark:bg-stone-800 rounded-md">
               <span className="px-2 py-1 bg-blue-100 dark:bg-blue-900/50 text-blue-800 dark:text-blue-300 text-xs rounded">{editingPermission.resource}</span>

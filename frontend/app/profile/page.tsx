@@ -8,6 +8,8 @@ import DashboardLayout from '@/components/layout/DashboardLayout';
 import Card from '@/components/common/Card';
 import Input from '@/components/common/Input';
 import Button from '@/components/common/Button';
+import UserAvatar from '@/components/common/UserAvatar';
+import ErrorAlert from '@/components/common/ErrorAlert';
 import { UpdateProfileDTO, ChangePasswordDTO } from '@/types';
 import { Pencil, Save, X, Lock, ShieldCheck } from 'lucide-react';
 
@@ -110,9 +112,7 @@ export default function ProfilePage() {
         >
           {/* Avatar + resumen */}
           <div className="flex items-center gap-5 mb-6 pb-6 border-b border-stone-100 dark:border-stone-800">
-            <div className="w-16 h-16 rounded-full bg-blue-600 flex items-center justify-center text-white text-2xl font-bold shrink-0">
-              {user.username[0].toUpperCase()}
-            </div>
+            <UserAvatar initial={user.username[0].toUpperCase()} size="lg" />
             <div>
               <h3 className="text-lg font-semibold text-stone-900 dark:text-stone-100">
                 {user.full_name || user.username}
@@ -135,11 +135,7 @@ export default function ProfilePage() {
 
           {isEditingProfile ? (
             <div className="space-y-4">
-              {profileError && (
-                <div className="bg-red-50 dark:bg-red-950/40 border border-red-100 dark:border-red-900/50 text-red-600 dark:text-red-400 px-3 py-2.5 rounded-md text-xs">
-                  {profileError}
-                </div>
-              )}
+              <ErrorAlert message={profileError} />
               <Input
                 label="Nombre Completo"
                 value={profileData.full_name ?? ''}
@@ -222,11 +218,7 @@ export default function ProfilePage() {
               onChange={(e) => setPasswordData({ ...passwordData, confirm: e.target.value })}
               placeholder="Repite la nueva contraseña"
             />
-            {passwordError && (
-              <div className="bg-red-50 dark:bg-red-950/40 border border-red-100 dark:border-red-900/50 text-red-600 dark:text-red-400 px-3 py-2.5 rounded-md text-xs">
-                {passwordError}
-              </div>
-            )}
+            <ErrorAlert message={passwordError} />
             <Button onClick={handlePasswordSubmit} disabled={isSavingPwd} size="sm" className="flex items-center gap-1.5">
               <Save className="w-3.5 h-3.5" />
               {isSavingPwd ? 'Cambiando...' : 'Cambiar Contraseña'}

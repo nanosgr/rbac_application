@@ -6,6 +6,7 @@ import { userService, roleService, permissionService } from '@/lib/api/services'
 import DashboardLayout from '@/components/layout/DashboardLayout';
 import Card from '@/components/common/Card';
 import { User } from '@/types';
+import UserAvatar from '@/components/common/UserAvatar';
 import { Users, ShieldCheck, KeyRound, Star } from 'lucide-react';
 
 interface StatCardProps {
@@ -122,9 +123,7 @@ export default function DashboardPage() {
                     className="flex items-center justify-between gap-3 py-2 border-b border-stone-50 dark:border-stone-800 last:border-0"
                   >
                     <div className="flex items-center gap-3">
-                      <div className="w-8 h-8 rounded-full bg-blue-600 flex items-center justify-center text-white text-xs font-semibold shrink-0">
-                        {u.username[0].toUpperCase()}
-                      </div>
+                      <UserAvatar initial={u.username[0].toUpperCase()} size="sm" />
                       <div className="min-w-0">
                         <p className="text-sm font-medium text-stone-700 dark:text-stone-200 truncate">
                           {u.full_name}

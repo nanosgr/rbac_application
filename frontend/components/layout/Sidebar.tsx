@@ -4,6 +4,7 @@ import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { useAuth } from '@/context/AuthContext';
 import ProtectedComponent from '@/components/common/ProtectedComponent';
+import UserAvatar from '@/components/common/UserAvatar';
 import {
   LayoutDashboard,
   User,
@@ -39,7 +40,7 @@ export default function Sidebar({ isOpen, onClose }: SidebarProps) {
   const pathname = usePathname();
   const { user, logout } = useAuth();
 
-  const initials = user?.username?.[0]?.toUpperCase() ?? '?';
+  const initial = user?.username?.[0]?.toUpperCase() ?? '?';
 
   return (
     <>
@@ -83,9 +84,7 @@ export default function Sidebar({ isOpen, onClose }: SidebarProps) {
         {/* User info */}
         <div className="px-4 py-3 border-b border-stone-200 dark:border-stone-800 shrink-0">
           <div className="flex items-center gap-3">
-            <div className="w-8 h-8 rounded-full bg-blue-600 flex items-center justify-center text-white text-xs font-semibold shrink-0">
-              {initials}
-            </div>
+            <UserAvatar initial={initial} size="sm" />
             <div className="flex-1 min-w-0">
               <p className="text-sm font-medium text-stone-800 dark:text-stone-100 truncate leading-tight">
                 {user?.full_name || user?.username}
