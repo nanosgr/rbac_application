@@ -35,6 +35,10 @@ class Settings(BaseSettings):
         else:
             return f"postgresql://{self.POSTGRES_USER}@{self.POSTGRES_SERVER}:{self.POSTGRES_PORT}/{self.POSTGRES_DB}"
     
+    # Rate limiting
+    RATE_LIMIT_LOGIN: str = "10/minute"
+    RATE_LIMIT_REFRESH: str = "30/minute"
+
     # CORS
     BACKEND_CORS_ORIGINS: List[str] = ["http://localhost:3000", "http://localhost:8080", "http://localhost:5173"]
     

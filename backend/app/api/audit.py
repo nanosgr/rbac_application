@@ -19,11 +19,15 @@ def get_audit_logs(
     user_id: Optional[int] = Query(default=None),
     action: Optional[str] = Query(default=None),
     resource: Optional[str] = Query(default=None),
+    status: Optional[str] = Query(default=None),
     from_date: Optional[datetime] = Query(default=None),
     to_date: Optional[datetime] = Query(default=None),
     db: Session = Depends(get_db),
     current_user: User = Depends(require_permissions(["audit:read"])),
 ):
-    total = audit_service.count_logs(db, user_id=user_id, action=action, resource=resource, from_date=from_date, to_date=to_date)
-    items = audit_service.get_logs(db, skip=(page - 1) * size, limit=size, user_id=user_id, action=action, resource=resource, from_date=from_date, to_date=to_date)
+    total = audit_service.count_logs(db, user_id=user_id, action=action, resource=resource,
+                                     status=status, from_date=from_date, to_date=to_date)
+    items = audit_service.get_logs(db, skip=(page - 1) * size, limit=size, user_id=user_id,
+                                   action=action, resource=resource, status=status,
+                                   from_date=from_date, to_date=to_date)
     return PaginatedResponse(items=items, total=total, page=page, size=size, pages=ceil(total / size) if total else 1)

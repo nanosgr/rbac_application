@@ -29,25 +29,27 @@ def get_password_hash(password: str) -> str:
     return bcrypt.hashpw(password.encode("utf-8"), bcrypt.gensalt()).decode("utf-8")
 
 
-def verify_token(token: str) -> Optional[str]:
-    """Verifica un access token. Rechaza refresh tokens."""
+def verify_token(token: str) -> Optional[dict]:
+    """Verifica un access token. Retorna payload con 'sub' y 'token_version', o None si inválido."""
     try:
         payload = jwt.decode(token, settings.SECRET_KEY, algorithms=[settings.ALGORITHM])
         if payload.get("type") != "access":
             return None
-        username: str = payload.get("sub")
-        return username if username else None
+        if not payload.get("sub") or payload.get("token_version") is None:
+            return None
+        return {"sub": payload["sub"], "token_version": payload["token_version"]}
     except JWTError:
         return None
 
 
-def verify_refresh_token(token: str) -> Optional[str]:
-    """Verifica un refresh token. Rechaza access tokens."""
+def verify_refresh_token(token: str) -> Optional[dict]:
+    """Verifica un refresh token. Retorna payload con 'sub' y 'token_version', o None si inválido."""
     try:
         payload = jwt.decode(token, settings.SECRET_KEY, algorithms=[settings.ALGORITHM])
         if payload.get("type") != "refresh":
             return None
-        username: str = payload.get("sub")
-        return username if username else None
+        if not payload.get("sub") or payload.get("token_version") is None:
+            return None
+        return {"sub": payload["sub"], "token_version": payload["token_version"]}
     except JWTError:
         return None

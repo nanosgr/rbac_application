@@ -11,6 +11,7 @@ import {
   Users,
   Shield,
   Key,
+  ClipboardList,
   LogOut,
   X,
   type LucideIcon,
@@ -29,6 +30,7 @@ const navItems: NavItem[] = [
   { label: 'Usuarios',   href: '/users',       icon: Users,  permissions: ['users:read'] },
   { label: 'Roles',      href: '/roles',       icon: Shield, permissions: ['roles:read'] },
   { label: 'Permisos',   href: '/permissions', icon: Key,    permissions: ['permissions:read'] },
+  { label: 'Auditoría',  href: '/audit',       icon: ClipboardList, permissions: ['audit:read'] },
 ];
 
 interface SidebarProps {

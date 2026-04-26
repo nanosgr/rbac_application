@@ -18,6 +18,13 @@ from app.core.deps import (
 router = APIRouter()
 
 
+def _get_request_meta(request: Request) -> tuple:
+    rid = getattr(request.state, "request_id", None)
+    ua = request.headers.get("user-agent")
+    ip = request.client.host if request.client else None
+    return rid, ua, ip
+
+
 @router.get("/", response_model=PaginatedResponse[PermissionRead])
 def read_permissions(
     page: int = Query(default=1, ge=1),
@@ -44,10 +51,11 @@ def create_permission(
     if permission_service.get_permission_by_name(db, name=permission.name):
         raise HTTPException(status_code=400, detail="Permission name already exists")
     result = permission_service.create_permission(db=db, permission=permission)
+    rid, ua, ip = _get_request_meta(request)
     audit_service.log(db, action="create", resource="permission", resource_id=result.id,
                       user_id=current_user.id, username=current_user.username,
-                      details=json.dumps({"name": result.name, "resource": result.resource, "action": result.action}),
-                      ip=request.client.host if request.client else None)
+                      after_data=json.dumps({"name": result.name, "resource": result.resource, "action": result.action}),
+                      ip=ip, request_id=rid, user_agent=ua)
     return result
 
 
@@ -81,17 +89,21 @@ def update_permission(
     db: Session = Depends(get_db),
     current_user: User = Depends(require_permission_update()),
 ):
-    if permission_service.get_permission(db, permission_id=permission_id) is None:
+    target = permission_service.get_permission(db, permission_id=permission_id)
+    if target is None:
         raise HTTPException(status_code=404, detail="Permission not found")
     if permission_update.name:
         existing = permission_service.get_permission_by_name(db, name=permission_update.name)
         if existing and existing.id != permission_id:
             raise HTTPException(status_code=400, detail="Permission name already exists")
+    before = json.dumps({"name": target.name, "resource": target.resource, "action": target.action, "is_active": target.is_active})
     result = permission_service.update_permission(db, permission_id, permission_update)
+    rid, ua, ip = _get_request_meta(request)
     audit_service.log(db, action="update", resource="permission", resource_id=permission_id,
                       user_id=current_user.id, username=current_user.username,
-                      details=json.dumps(permission_update.model_dump(exclude_unset=True)),
-                      ip=request.client.host if request.client else None)
+                      before_data=before,
+                      after_data=json.dumps(permission_update.model_dump(exclude_unset=True)),
+                      ip=ip, request_id=rid, user_agent=ua)
     return result
 
 
@@ -103,10 +115,12 @@ def delete_permission(
     current_user: User = Depends(require_permission_delete()),
 ):
     target = permission_service.get_permission(db, permission_id)
+    before = json.dumps({"name": target.name if target else None})
     if not permission_service.delete_permission(db, permission_id):
         raise HTTPException(status_code=404, detail="Permission not found")
+    rid, ua, ip = _get_request_meta(request)
     audit_service.log(db, action="delete", resource="permission", resource_id=permission_id,
                       user_id=current_user.id, username=current_user.username,
-                      details=json.dumps({"deleted_permission": target.name if target else None}),
-                      ip=request.client.host if request.client else None)
+                      before_data=before,
+                      ip=ip, request_id=rid, user_agent=ua)
     return {"message": "Permission deleted successfully"}

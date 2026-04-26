@@ -18,6 +18,13 @@ from app.core.deps import (
 router = APIRouter()
 
 
+def _get_request_meta(request: Request) -> tuple:
+    rid = getattr(request.state, "request_id", None)
+    ua = request.headers.get("user-agent")
+    ip = request.client.host if request.client else None
+    return rid, ua, ip
+
+
 @router.get("/", response_model=PaginatedResponse[RoleRead])
 def read_roles(
     page: int = Query(default=1, ge=1),
@@ -43,10 +50,11 @@ def create_role(
     if role_service.get_role_by_name(db, name=role.name):
         raise HTTPException(status_code=400, detail="Role name already exists")
     result = role_service.create_role(db=db, role=role)
+    rid, ua, ip = _get_request_meta(request)
     audit_service.log(db, action="create", resource="role", resource_id=result.id,
                       user_id=current_user.id, username=current_user.username,
-                      details=json.dumps({"name": result.name}),
-                      ip=request.client.host if request.client else None)
+                      after_data=json.dumps({"name": result.name, "description": result.description}),
+                      ip=ip, request_id=rid, user_agent=ua)
     return result
 
 
@@ -70,17 +78,21 @@ def update_role(
     db: Session = Depends(get_db),
     current_user: User = Depends(require_role_update()),
 ):
-    if role_service.get_role(db, role_id=role_id) is None:
+    target = role_service.get_role(db, role_id=role_id)
+    if target is None:
         raise HTTPException(status_code=404, detail="Role not found")
     if role_update.name:
         existing = role_service.get_role_by_name(db, name=role_update.name)
         if existing and existing.id != role_id:
             raise HTTPException(status_code=400, detail="Role name already exists")
+    before = json.dumps({"name": target.name, "description": target.description, "is_active": target.is_active})
     result = role_service.update_role(db, role_id, role_update)
+    rid, ua, ip = _get_request_meta(request)
     audit_service.log(db, action="update", resource="role", resource_id=role_id,
                       user_id=current_user.id, username=current_user.username,
-                      details=json.dumps(role_update.model_dump(exclude_unset=True)),
-                      ip=request.client.host if request.client else None)
+                      before_data=before,
+                      after_data=json.dumps(role_update.model_dump(exclude_unset=True)),
+                      ip=ip, request_id=rid, user_agent=ua)
     return result
 
 
@@ -92,12 +104,14 @@ def delete_role(
     current_user: User = Depends(require_role_delete()),
 ):
     target = role_service.get_role(db, role_id)
+    before = json.dumps({"name": target.name if target else None})
     if not role_service.delete_role(db, role_id):
         raise HTTPException(status_code=404, detail="Role not found")
+    rid, ua, ip = _get_request_meta(request)
     audit_service.log(db, action="delete", resource="role", resource_id=role_id,
                       user_id=current_user.id, username=current_user.username,
-                      details=json.dumps({"deleted_role": target.name if target else None}),
-                      ip=request.client.host if request.client else None)
+                      before_data=before,
+                      ip=ip, request_id=rid, user_agent=ua)
     return {"message": "Role deleted successfully"}
 
 
@@ -111,11 +125,15 @@ def assign_permissions_to_role(
 ):
     if permission_assignment.role_id != role_id:
         raise HTTPException(status_code=400, detail="Role ID in path and body must match")
-    updated_role = role_service.assign_permissions_to_role(db, role_id, permission_assignment.permission_ids)
-    if not updated_role:
+    target = role_service.get_role(db, role_id)
+    if target is None:
         raise HTTPException(status_code=404, detail="Role not found")
+    before = json.dumps({"permission_ids": [p.id for p in target.permissions]})
+    updated_role = role_service.assign_permissions_to_role(db, role_id, permission_assignment.permission_ids)
+    rid, ua, ip = _get_request_meta(request)
     audit_service.log(db, action="assign_permissions", resource="role", resource_id=role_id,
                       user_id=current_user.id, username=current_user.username,
-                      details=json.dumps({"permission_ids": permission_assignment.permission_ids}),
-                      ip=request.client.host if request.client else None)
+                      before_data=before,
+                      after_data=json.dumps({"permission_ids": permission_assignment.permission_ids}),
+                      ip=ip, request_id=rid, user_agent=ua)
     return updated_role

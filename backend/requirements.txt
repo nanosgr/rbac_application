@@ -11,3 +11,5 @@ pydantic==2.13.2
 pydantic-settings==2.13.1
 python-dotenv==1.2.2
 email-validator==2.3.0
+cachetools==5.5.0
+slowapi==0.1.9

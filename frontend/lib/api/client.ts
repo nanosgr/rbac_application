@@ -122,6 +122,12 @@ class ApiClient {
     }
 
     if (!response.ok) {
+      if (response.status === 403) {
+        const error = await response.json().catch(() => ({ detail: 'No tienes permiso para realizar esta acción' }));
+        const err = new Error(error.detail || 'No tienes permiso para realizar esta acción') as Error & { status: number };
+        err.status = 403;
+        throw err;
+      }
       const error = await response.json().catch(() => ({ detail: 'An error occurred' }));
       throw new Error(error.detail || `HTTP ${response.status}`);
     }

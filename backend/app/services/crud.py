@@ -41,13 +41,14 @@ class UserService:
             query = query.where(User.is_active == is_active)
         return db.exec(query).one()
 
-    def create_user(self, db: Session, user: UserCreate) -> User:
+    def create_user(self, db: Session, user: UserCreate, created_by: Optional[int] = None) -> User:
         db_user = User(
             username=user.username,
             email=user.email,
             hashed_password=get_password_hash(user.password),
             full_name=user.full_name,
             is_active=user.is_active,
+            created_by=created_by,
         )
         db.add(db_user)
         db.commit()
@@ -60,6 +61,8 @@ class UserService:
             update_data = user_update.model_dump(exclude_unset=True)
             if "password" in update_data:
                 update_data["hashed_password"] = get_password_hash(update_data.pop("password"))
+            if update_data.get("is_active") is False:
+                db_user.token_version += 1
             for field, value in update_data.items():
                 setattr(db_user, field, value)
             db.commit()
@@ -90,11 +93,18 @@ class UserService:
         db.commit()
         return True
 
+    def increment_token_version(self, db: Session, user_id: int) -> None:
+        db_user = db.get(User, user_id)
+        if db_user:
+            db_user.token_version += 1
+            db.commit()
+
     def assign_roles_to_user(self, db: Session, user_id: int, role_ids: List[int]) -> Optional[User]:
         db_user = self.get_user(db, user_id)
         if db_user:
             roles = db.exec(select(Role).where(Role.id.in_(role_ids))).all()
             db_user.roles = roles
+            db_user.token_version += 1
             db.commit()
         return self.get_user(db, user_id)
 

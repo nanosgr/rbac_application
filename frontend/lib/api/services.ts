@@ -3,6 +3,7 @@ import {
   User,
   Role,
   Permission,
+  AuditLog,
   PaginatedResponse,
   CreateUserDTO,
   UpdateUserDTO,
@@ -15,6 +16,7 @@ import {
   GetUsersParams,
   GetRolesParams,
   GetPermissionsParams,
+  GetAuditLogsParams,
 } from '@/types';
 
 function buildQuery(params: Record<string, string | number | boolean | undefined>): string {
@@ -101,4 +103,10 @@ export const permissionService = {
 
   getAvailableActions: () =>
     apiClient.get<{ actions: string[] }>('/permissions/actions/available'),
+};
+
+// Audit Service
+export const auditService = {
+  getLogs: (params: GetAuditLogsParams = {}) =>
+    apiClient.get<PaginatedResponse<AuditLog>>(`/audit/logs${buildQuery(params as Record<string, string | number | boolean | undefined>)}`),
 };

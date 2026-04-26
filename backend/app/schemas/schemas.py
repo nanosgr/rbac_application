@@ -58,4 +58,10 @@ class AuditLogRead(SQLModel):
     resource_id: Optional[int] = None
     details: Optional[str] = None
     ip_address: Optional[str] = None
+    request_id: Optional[str] = None
+    status: str = "success"
+    before_data: Optional[str] = None
+    after_data: Optional[str] = None
+    subject_id: Optional[int] = None
+    user_agent: Optional[str] = None
     timestamp: Optional[datetime] = None

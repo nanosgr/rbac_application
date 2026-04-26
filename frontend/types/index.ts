@@ -44,6 +44,12 @@ export interface AuditLog {
   resource_id: number | null;
   details: string | null;
   ip_address: string | null;
+  request_id: string | null;
+  status: string;
+  before_data: string | null;
+  after_data: string | null;
+  subject_id: number | null;
+  user_agent: string | null;
   timestamp: string | null;
 }
 
@@ -161,6 +167,17 @@ export interface GetPermissionsParams {
   resource?: string;
   action?: string;
   is_active?: boolean;
+}
+
+export interface GetAuditLogsParams {
+  page?: number;
+  size?: number;
+  user_id?: number;
+  action?: string;
+  resource?: string;
+  status?: string;
+  from_date?: string;
+  to_date?: string;
 }
 
 // Component props types

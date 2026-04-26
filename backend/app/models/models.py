@@ -137,6 +137,11 @@ class User(UserBase, table=True):
     id: Optional[int] = Field(default=None, primary_key=True)
     hashed_password: str
     is_superuser: bool = False
+    token_version: int = Field(default=1)
+    created_by: Optional[int] = Field(
+        default=None,
+        sa_column=Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True),
+    )
     created_at: Optional[datetime] = Field(
         default=None,
         sa_column=Column(DateTime(timezone=True), server_default=func.now()),
@@ -186,6 +191,12 @@ class AuditLog(SQLModel, table=True):
     resource_id: Optional[int] = None
     details: Optional[str] = None
     ip_address: Optional[str] = None
+    request_id: Optional[str] = None
+    status: str = Field(default="success")
+    before_data: Optional[str] = None
+    after_data: Optional[str] = None
+    subject_id: Optional[int] = None
+    user_agent: Optional[str] = None
     timestamp: Optional[datetime] = Field(
         default=None,
         sa_column=Column(DateTime(timezone=True), server_default=func.now()),

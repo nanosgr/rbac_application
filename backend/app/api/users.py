@@ -1,7 +1,7 @@
 import json
 from math import ceil
 from typing import Optional
-from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from sqlmodel import Session
 from app.db.database import get_db
 from app.services.crud import user_service
@@ -14,9 +14,17 @@ from app.core.deps import (
     require_user_create,
     require_user_update,
     require_user_delete,
+    check_owner_or_permission,
 )
 
 router = APIRouter()
+
+
+def _get_request_meta(request: Request) -> tuple:
+    rid = getattr(request.state, "request_id", None)
+    ua = request.headers.get("user-agent")
+    ip = request.client.host if request.client else None
+    return rid, ua, ip
 
 
 @router.get("/", response_model=PaginatedResponse[UserRead])
@@ -45,11 +53,12 @@ def create_user(
         raise HTTPException(status_code=400, detail="Username already registered")
     if user_service.get_user_by_email(db, email=user.email):
         raise HTTPException(status_code=400, detail="Email already registered")
-    result = user_service.create_user(db=db, user=user)
+    result = user_service.create_user(db=db, user=user, created_by=current_user.id)
+    rid, ua, ip = _get_request_meta(request)
     audit_service.log(db, action="create", resource="user", resource_id=result.id,
-                      user_id=current_user.id, username=current_user.username,
-                      details=json.dumps({"username": result.username, "email": result.email}),
-                      ip=request.client.host if request.client else None)
+                      user_id=current_user.id, username=current_user.username, subject_id=result.id,
+                      after_data=json.dumps({"username": result.username, "email": result.email}),
+                      ip=ip, request_id=rid, user_agent=ua)
     return result
 
 
@@ -69,12 +78,15 @@ def update_user_me(
         existing = user_service.get_user_by_email(db, email=profile_update.email)
         if existing and existing.id != current_user.id:
             raise HTTPException(status_code=400, detail="Email already taken")
+    before = json.dumps({"email": current_user.email, "full_name": current_user.full_name})
     update = UserUpdate(**profile_update.model_dump(exclude_unset=True))
     result = user_service.update_user(db, current_user.id, update)
+    rid, ua, ip = _get_request_meta(request)
     audit_service.log(db, action="update", resource="user", resource_id=current_user.id,
-                      user_id=current_user.id, username=current_user.username,
-                      details=json.dumps(profile_update.model_dump(exclude_unset=True)),
-                      ip=request.client.host if request.client else None)
+                      user_id=current_user.id, username=current_user.username, subject_id=current_user.id,
+                      before_data=before,
+                      after_data=json.dumps(profile_update.model_dump(exclude_unset=True)),
+                      ip=ip, request_id=rid, user_agent=ua)
     return result
 
 
@@ -87,9 +99,10 @@ def change_password_me(
 ):
     if not user_service.change_password(db, current_user.id, password_data.current_password, password_data.new_password):
         raise HTTPException(status_code=400, detail="Current password is incorrect")
+    rid, ua, ip = _get_request_meta(request)
     audit_service.log(db, action="password_change", resource="user", resource_id=current_user.id,
-                      user_id=current_user.id, username=current_user.username,
-                      ip=request.client.host if request.client else None)
+                      user_id=current_user.id, username=current_user.username, subject_id=current_user.id,
+                      ip=ip, request_id=rid, user_agent=ua)
     return {"message": "Password updated successfully"}
 
 
@@ -97,11 +110,13 @@ def change_password_me(
 def read_user(
     user_id: int,
     db: Session = Depends(get_db),
-    current_user: User = Depends(require_user_read()),
+    current_user: User = Depends(get_current_active_user),
 ):
     db_user = user_service.get_user(db, user_id=user_id)
     if db_user is None:
         raise HTTPException(status_code=404, detail="User not found")
+    if not check_owner_or_permission(db_user.created_by, current_user, "users:read"):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Permission denied. Required: users:read")
     return db_user
 
 
@@ -111,10 +126,13 @@ def update_user(
     user_id: int,
     user_update: UserUpdate,
     db: Session = Depends(get_db),
-    current_user: User = Depends(require_user_update()),
+    current_user: User = Depends(get_current_active_user),
 ):
-    if user_service.get_user(db, user_id=user_id) is None:
+    target = user_service.get_user(db, user_id=user_id)
+    if target is None:
         raise HTTPException(status_code=404, detail="User not found")
+    if not check_owner_or_permission(target.created_by, current_user, "users:update"):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Permission denied. Required: users:update")
     if user_update.username:
         existing = user_service.get_user_by_username(db, username=user_update.username)
         if existing and existing.id != user_id:
@@ -123,11 +141,15 @@ def update_user(
         existing = user_service.get_user_by_email(db, email=user_update.email)
         if existing and existing.id != user_id:
             raise HTTPException(status_code=400, detail="Email already taken")
+    before = json.dumps({"username": target.username, "email": target.email,
+                         "full_name": target.full_name, "is_active": target.is_active})
     result = user_service.update_user(db, user_id, user_update)
+    rid, ua, ip = _get_request_meta(request)
     audit_service.log(db, action="update", resource="user", resource_id=user_id,
-                      user_id=current_user.id, username=current_user.username,
-                      details=json.dumps(user_update.model_dump(exclude_unset=True, exclude={"password"})),
-                      ip=request.client.host if request.client else None)
+                      user_id=current_user.id, username=current_user.username, subject_id=user_id,
+                      before_data=before,
+                      after_data=json.dumps(user_update.model_dump(exclude_unset=True, exclude={"password"})),
+                      ip=ip, request_id=rid, user_agent=ua)
     return result
 
 
@@ -141,12 +163,14 @@ def delete_user(
     if current_user.id == user_id:
         raise HTTPException(status_code=400, detail="Cannot delete your own user account")
     target = user_service.get_user(db, user_id)
+    before = json.dumps({"username": target.username if target else None})
     if not user_service.delete_user(db, user_id):
         raise HTTPException(status_code=404, detail="User not found")
+    rid, ua, ip = _get_request_meta(request)
     audit_service.log(db, action="delete", resource="user", resource_id=user_id,
-                      user_id=current_user.id, username=current_user.username,
-                      details=json.dumps({"deleted_username": target.username if target else None}),
-                      ip=request.client.host if request.client else None)
+                      user_id=current_user.id, username=current_user.username, subject_id=user_id,
+                      before_data=before,
+                      ip=ip, request_id=rid, user_agent=ua)
     return {"message": "User deleted successfully"}
 
 
@@ -160,11 +184,15 @@ def assign_roles_to_user(
 ):
     if role_assignment.user_id != user_id:
         raise HTTPException(status_code=400, detail="User ID in path and body must match")
-    updated_user = user_service.assign_roles_to_user(db, user_id, role_assignment.role_ids)
-    if not updated_user:
+    target = user_service.get_user(db, user_id)
+    if target is None:
         raise HTTPException(status_code=404, detail="User not found")
+    before = json.dumps({"role_ids": [r.id for r in target.roles]})
+    updated_user = user_service.assign_roles_to_user(db, user_id, role_assignment.role_ids)
+    rid, ua, ip = _get_request_meta(request)
     audit_service.log(db, action="assign_roles", resource="user", resource_id=user_id,
-                      user_id=current_user.id, username=current_user.username,
-                      details=json.dumps({"role_ids": role_assignment.role_ids}),
-                      ip=request.client.host if request.client else None)
+                      user_id=current_user.id, username=current_user.username, subject_id=user_id,
+                      before_data=before,
+                      after_data=json.dumps({"role_ids": role_assignment.role_ids}),
+                      ip=ip, request_id=rid, user_agent=ua)
     return updated_user
