@@ -10,8 +10,8 @@ Referencia personal para arrancar nuevos proyectos basados en este template. Cub
 2. [Setup inicial de un nuevo proyecto](#2-setup-inicial-de-un-nuevo-proyecto)
 3. [Arquitectura de seguridad](#3-arquitectura-de-seguridad)
 4. [Adaptar el RBAC a un nuevo dominio](#4-adaptar-el-rbac-a-un-nuevo-dominio)
-5. [Agregar un nuevo recurso protegido](#5-agregar-un-nuevo-recurso-protegido)
-6. [Protección en el frontend](#6-protección-en-el-frontend)
+5. [Agregar un nuevo recurso — Backend](#5-agregar-un-nuevo-recurso-protegido)
+6. [Agregar un nuevo recurso — Frontend](#6-nueva-página-en-el-frontend)
 7. [Variables de entorno y checklist de producción](#7-variables-de-entorno-y-checklist-de-producción)
 8. [Referencia rápida](#8-referencia-rápida)
 
@@ -544,7 +544,25 @@ from app.api import productos
 app.include_router(productos.router, prefix=settings.API_V1_STR)
 ```
 
-### 5.6 Migración Alembic
+### 5.6 Actualizar la lista de recursos disponibles
+
+El endpoint `/permissions/resources/available` tiene los recursos **hardcodeados**. Al agregar un recurso nuevo, actualizarlo en `backend/app/api/permissions.py`:
+
+```python
+@router.get("/resources/available")
+def get_available_resources(current_user: User = Depends(require_permission_read())):
+    return {
+        "resources": [
+            "users", "roles", "permissions",
+            "dashboard", "reports", "settings",
+            "productos",   # <-- agregar el nuevo recurso aquí
+        ]
+    }
+```
+
+Sin este paso, la UI de administración de permisos no mostrará el nuevo recurso en el selector.
+
+### 5.7 Migración Alembic
 
 ```bash
 cd backend
@@ -554,79 +572,53 @@ alembic upgrade head
 
 ---
 
-## 6. Protección en el frontend
+## 6. Nueva página en el frontend
 
-### 6.1 Verificar permisos en componentes
+Checklist completo para agregar la página `/productos` al frontend.
 
-`ProtectedComponent` muestra u oculta UI según permisos del usuario activo:
+### 6.1 Tipos TypeScript
 
-```tsx
-import ProtectedComponent from '@/components/common/ProtectedComponent';
+`frontend/types/index.ts`
 
-// Mostrar botón solo si tiene productos:create
-<ProtectedComponent permissions={["productos:create"]}>
-  <Button onClick={handleCreate}>Nuevo Producto</Button>
-</ProtectedComponent>
+```typescript
+export interface Producto {
+  id: number;
+  nombre: string;
+  descripcion?: string;
+  precio: number;
+  is_active: boolean;
+  created_at: string;
+  updated_at?: string;
+}
 
-// Mostrar si tiene ALGUNO de los permisos
-<ProtectedComponent permissions={["productos:update", "productos:delete"]}>
-  <RowActions />
-</ProtectedComponent>
+export interface CreateProductoDTO {
+  nombre: string;
+  descripcion?: string;
+  precio: number;
+}
 
-// Mostrar solo si tiene TODOS los permisos
-<ProtectedComponent permissions={["reportes:read", "reportes:export"]} requireAll>
-  <ExportButton />
-</ProtectedComponent>
-```
+export interface UpdateProductoDTO {
+  nombre?: string;
+  descripcion?: string;
+  precio?: number;
+  is_active?: boolean;
+}
 
-### 6.2 Usar el hook `useAuth` directamente
-
-```tsx
-import { useAuth } from '@/context/AuthContext';
-
-function MiComponente() {
-  const { user, hasPermission, hasAnyPermission, isAuthenticated } = useAuth();
-
-  if (!hasPermission("productos:read")) {
-    return <p>Sin acceso</p>;
-  }
-
-  return <TablaProductos />;
+export interface GetProductosParams {
+  page?: number;
+  size?: number;
+  search?: string;
+  is_active?: boolean;
 }
 ```
 
-### 6.3 Proteger páginas completas
-
-En cualquier página de `app/`, redirigir si no hay sesión:
-
-```tsx
-'use client';
-import { useAuth } from '@/context/AuthContext';
-import { useRouter } from 'next/navigation';
-import { useEffect } from 'react';
-
-export default function ProductosPage() {
-  const { isAuthenticated, isLoading, hasPermission } = useAuth();
-  const router = useRouter();
-
-  useEffect(() => {
-    if (!isLoading && !isAuthenticated) router.push('/login');
-    if (!isLoading && isAuthenticated && !hasPermission("productos:read")) router.push('/dashboard');
-  }, [isAuthenticated, isLoading]);
-
-  if (isLoading) return <Skeleton />;
-
-  return <ContenidoProductos />;
-}
-```
-
-### 6.4 Agregar el servicio API del nuevo recurso
+### 6.2 Servicio API
 
 `frontend/lib/api/services.ts`
 
 ```typescript
 export const productoService = {
-  getAll: (params?: { page?: number; size?: number; search?: string }) =>
+  getAll: (params?: GetProductosParams) =>
     apiClient.get<PaginatedResponse<Producto>>(`/productos?${buildQuery(params)}`),
 
   getById: (id: number) =>
@@ -643,31 +635,155 @@ export const productoService = {
 };
 ```
 
-### 6.5 Agregar tipos TypeScript
+### 6.3 Crear la página
 
-`frontend/types/index.ts`
+Crear el archivo `frontend/app/productos/page.tsx`. El patrón estándar combina la guarda de auth, la carga de datos y los controles protegidos por permiso:
 
-```typescript
-export interface Producto {
-  id: number;
-  nombre: string;
-  descripcion?: string;
-  precio: number;
-  is_active: boolean;
-  created_at: string;
+```tsx
+'use client';
+import { useEffect, useState, useCallback } from 'react';
+import { useRouter } from 'next/navigation';
+import { useAuth } from '@/context/AuthContext';
+import { useToast } from '@/context/ToastContext';
+import DashboardLayout from '@/components/layout/DashboardLayout';
+import ProtectedComponent from '@/components/common/ProtectedComponent';
+import { productoService } from '@/lib/api/services';
+import type { Producto } from '@/types';
+
+export default function ProductosPage() {
+  const { isAuthenticated, isLoading, hasPermission } = useAuth();
+  const { showToast } = useToast();
+  const router = useRouter();
+
+  const [productos, setProductos] = useState<Producto[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  // Guarda de autenticación y permiso mínimo
+  useEffect(() => {
+    if (!isLoading && !isAuthenticated) router.push('/login');
+    if (!isLoading && isAuthenticated && !hasPermission('productos:read')) router.push('/dashboard');
+  }, [isAuthenticated, isLoading, hasPermission, router]);
+
+  const fetchProductos = useCallback(async () => {
+    try {
+      setLoading(true);
+      const data = await productoService.getAll({ page: 1, size: 20 });
+      setProductos(data.items);
+    } catch {
+      showToast('Error al cargar productos', 'error');
+    } finally {
+      setLoading(false);
+    }
+  }, [showToast]);
+
+  useEffect(() => {
+    if (isAuthenticated) fetchProductos();
+  }, [isAuthenticated, fetchProductos]);
+
+  if (isLoading || loading) return <div>Cargando…</div>;
+
+  return (
+    <DashboardLayout>
+      <div className="space-y-4">
+        <div className="flex justify-between items-center">
+          <h1 className="text-xl font-semibold">Productos</h1>
+
+          {/* Solo visible si tiene permiso de crear */}
+          <ProtectedComponent permissions={['productos:create']}>
+            <button onClick={() => { /* abrir modal */ }}>
+              Nuevo producto
+            </button>
+          </ProtectedComponent>
+        </div>
+
+        {/* Tabla de datos */}
+        {productos.map(p => (
+          <div key={p.id}>
+            <span>{p.nombre}</span>
+
+            {/* Acciones protegidas individualmente */}
+            <ProtectedComponent permissions={['productos:update']}>
+              <button onClick={() => { /* editar */ }}>Editar</button>
+            </ProtectedComponent>
+            <ProtectedComponent permissions={['productos:delete']}>
+              <button onClick={() => { /* eliminar */ }}>Eliminar</button>
+            </ProtectedComponent>
+          </div>
+        ))}
+      </div>
+    </DashboardLayout>
+  );
 }
+```
 
-export interface CreateProductoDTO {
-  nombre: string;
-  descripcion?: string;
-  precio: number;
-}
+### 6.4 Agregar al sidebar de navegación
 
-export interface UpdateProductoDTO {
-  nombre?: string;
-  descripcion?: string;
-  precio?: number;
-  is_active?: boolean;
+`frontend/components/layout/Sidebar.tsx`
+
+Agregar una entrada al array `navItems` con el ícono, la ruta y el permiso requerido para verla. El sidebar oculta automáticamente los ítems que el usuario no puede ver.
+
+```tsx
+import { Package } from 'lucide-react'; // elegir ícono de lucide-react
+
+const navItems: NavItem[] = [
+  { label: 'Dashboard',   href: '/dashboard',   icon: LayoutDashboard, permissions: ['dashboard:read'] },
+  { label: 'Mi Perfil',   href: '/profile',     icon: User },
+  { label: 'Usuarios',    href: '/users',        icon: Users,           permissions: ['users:read'] },
+  { label: 'Productos',   href: '/productos',    icon: Package,         permissions: ['productos:read'] }, // ← nueva entrada
+  { label: 'Roles',       href: '/roles',        icon: Shield,          permissions: ['roles:read'] },
+  { label: 'Permisos',    href: '/permissions',  icon: Key,             permissions: ['permissions:read'] },
+  { label: 'Auditoría',   href: '/audit',        icon: ClipboardList,   permissions: ['audit:read'] },
+];
+```
+
+Los ítems sin `permissions` siempre se muestran (como "Mi Perfil"). El sidebar ya maneja el filtrado con `ProtectedComponent` internamente.
+
+### 6.5 Proteger secciones de UI con `ProtectedComponent`
+
+```tsx
+import ProtectedComponent from '@/components/common/ProtectedComponent';
+
+// Botón visible solo con un permiso específico
+<ProtectedComponent permissions={['productos:create']}>
+  <Button onClick={handleCreate}>Nuevo Producto</Button>
+</ProtectedComponent>
+
+// Visible si tiene ALGUNO de los permisos
+<ProtectedComponent permissions={['productos:update', 'productos:delete']}>
+  <RowActions />
+</ProtectedComponent>
+
+// Visible solo si tiene TODOS los permisos
+<ProtectedComponent permissions={['reportes:read', 'reportes:export']} requireAll>
+  <ExportButton />
+</ProtectedComponent>
+```
+
+### 6.6 Verificar permisos directamente en código
+
+Usar `useAuth` cuando la lógica es más compleja que mostrar/ocultar un elemento:
+
+```tsx
+import { useAuth } from '@/context/AuthContext';
+
+function FilaProducto({ producto }: { producto: Producto }) {
+  const { hasPermission, hasAnyPermission } = useAuth();
+
+  const puedeEditar  = hasPermission('productos:update');
+  const puedeEliminar = hasPermission('productos:delete');
+  const puedeActuar  = hasAnyPermission(['productos:update', 'productos:delete']);
+
+  return (
+    <tr>
+      <td>{producto.nombre}</td>
+      {puedeActuar && (
+        <td>
+          {puedeEditar  && <button>Editar</button>}
+          {puedeEliminar && <button>Eliminar</button>}
+        </td>
+      )}
+    </tr>
+  );
 }
 ```
 
@@ -793,14 +909,27 @@ docker compose logs -f postgres
 | POST | `/api/v1/auth/refresh` | `{"refresh_token": "..."}` | Renueva access token |
 | POST | `/api/v1/auth/logout` | — (requiere Bearer) | Logout (auditado) |
 
-### Patrón de permisos para nuevo recurso
+### Checklist completo para un nuevo recurso
 
+**Backend:**
 ```
-1. Definir permisos en init_db.py:     { "name": "X:create", "resource": "X", "action": "create" }
-2. Asignar permisos a roles en init_db.py
-3. Agregar helpers en deps.py:          def require_X_create(): return require_permissions(["X:create"])
-4. Usar en endpoint:                    current_user = Depends(require_permissions(["X:create"]))
-5. Agregar tipos en frontend/types/
-6. Agregar servicio en frontend/lib/api/services.ts
-7. Usar ProtectedComponent en UI para mostrar/ocultar controles
+1. models/models.py          → Clase SQLModel con table=True
+2. schemas/schemas.py        → DTOs Create / Read / Update
+3. services/crud.py          → Clase XService con get/get_all/create/update/delete + singleton
+4. api/X.py                  → Router con endpoints y require_permissions(["X:action"])
+5. main.py                   → app.include_router(X.router, prefix=settings.API_V1_STR)
+6. api/permissions.py        → Agregar "X" a la lista de resources/available
+7. db/init_db.py             → Permisos X:create/read/update/delete y asignarlos a roles
+8. core/deps.py              → Helpers opcionales require_X_read(), require_X_create(), etc.
+9. alembic                   → alembic revision --autogenerate -m "add X table"
+                               alembic upgrade head
+```
+
+**Frontend:**
+```
+1. types/index.ts            → Interfaces X, CreateXDTO, UpdateXDTO, GetXParams
+2. lib/api/services.ts       → xService con getAll/getById/create/update/delete
+3. app/X/page.tsx            → Página con guarda de auth + fetchData + DashboardLayout
+4. components/layout/Sidebar.tsx → Entrada en navItems con permissions: ["X:read"]
+5. En la página              → ProtectedComponent para botones de crear/editar/eliminar
 ```
