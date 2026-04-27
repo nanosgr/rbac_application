@@ -44,7 +44,10 @@ def get_current_user(
     cached = _permissions_cache.get(cache_key)
 
     if cached is not None:
-        user, _ = cached
+        user_id, _ = cached
+        user = user_service.get_user(db, user_id)
+        if user is None:
+            raise credentials_exception
         return user
 
     user = user_service.get_user_by_username(db, username=payload["sub"])
@@ -55,7 +58,7 @@ def get_current_user(
         raise credentials_exception
 
     permissions = get_user_permissions(user)
-    _permissions_cache[cache_key] = (user, permissions)
+    _permissions_cache[cache_key] = (user.id, permissions)
 
     return user
 
