@@ -13,7 +13,8 @@ Referencia personal para arrancar nuevos proyectos basados en este template. Cub
 5. [Agregar un nuevo recurso — Backend](#5-agregar-un-nuevo-recurso-protegido)
 6. [Agregar un nuevo recurso — Frontend](#6-nueva-página-en-el-frontend)
 7. [Variables de entorno y checklist de producción](#7-variables-de-entorno-y-checklist-de-producción)
-8. [Referencia rápida](#8-referencia-rápida)
+8. [Limitaciones conocidas y evolución futura](#8-limitaciones-conocidas-y-evolución-futura)
+9. [Referencia rápida](#9-referencia-rápida)
 
 ---
 
@@ -28,11 +29,19 @@ Referencia personal para arrancar nuevos proyectos basados en este template. Cub
 | Estilos | Tailwind CSS v4 | UI con soporte dark/light mode |
 | Infraestructura | Docker Compose | Levanta PostgreSQL en local |
 
-**Sistema de permisos:** `recurso:acción` — granular, heredado por roles, con bypass para superusuarios.
+**Sistema de permisos RBAC:** `recurso:acción` — granular, heredado por roles. Los superusuarios reciben el wildcard `*:*` tratado como un permiso más, no como bypass especial.
 
 **Flujo de autenticación:** JWT stateless con access token (30 min) + refresh token (7 días). El frontend renueva el access token automáticamente ante un 401.
 
-**Auditoría:** Toda operación CRUD queda registrada con usuario, acción, recurso y dirección IP.
+**Revocación de tokens:** Cada usuario tiene un `token_version` en base de datos. Al hacer logout o cambiar roles, la versión se incrementa e invalida todos los tokens activos inmediatamente.
+
+**Caching de permisos:** Los permisos del usuario se cachean en memoria (TTL 60 s) para evitar consultas a la base de datos en cada request.
+
+**Rate limiting:** Login limitado a 10 req/min por IP; refresh a 30 req/min. Implementado con `slowapi`.
+
+**Auditoría:** Toda operación CRUD queda registrada con usuario, acción, recurso, IP, user-agent, request_id, datos antes/después y resultado (success/failure).
+
+**ABAC básico:** `check_owner_or_permission()` permite combinar verificación de permisos con ownership del recurso.
 
 ---
 
@@ -41,7 +50,6 @@ Referencia personal para arrancar nuevos proyectos basados en este template. Cub
 ### 2.1 Clonar y renombrar
 
 ```bash
-# Clonar el template
 git clone <repo> mi-proyecto
 cd mi-proyecto
 
@@ -77,6 +85,10 @@ POSTGRES_DB=mi_proyecto_db
 POSTGRES_PORT=5432
 
 BACKEND_CORS_ORIGINS=["http://localhost:3000"]
+
+# Rate limiting (ajustar según necesidad)
+RATE_LIMIT_LOGIN=10/minute
+RATE_LIMIT_REFRESH=30/minute
 ```
 
 Crear `frontend/.env.local`:
@@ -88,10 +100,7 @@ NEXT_PUBLIC_API_URL=http://localhost:8000/api/v1
 ### 2.3 Levantar la base de datos
 
 ```bash
-# Ajustar credenciales en docker-compose.yml para que coincidan con .env
 docker compose up -d
-
-# Verificar que PostgreSQL está healthy
 docker compose ps
 ```
 
@@ -106,7 +115,6 @@ pip install -r requirements.txt
 # Crear tablas e inicializar datos semilla
 python -c "from app.db.init_db import create_tables, init_db; create_tables(); init_db()"
 
-# Levantar servidor
 uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 ```
 
@@ -137,67 +145,97 @@ App disponible en: `http://localhost:3000`
 
 ## 3. Arquitectura de seguridad
 
-### 3.1 Diagrama de flujo de autenticación
+### 3.1 Diagrama de flujo de autenticación completo
 
 ```
 [Login]
   │
   ▼
 POST /api/v1/auth/login (form-urlencoded: username + password)
-  │
+  │   ← rate limited: 10/min por IP
   ├── Backend valida con bcrypt
-  ├── Genera access_token (HS256, 30 min, claim type="access")
-  └── Genera refresh_token (HS256, 7 días, claim type="refresh")
+  ├── Genera access_token  (HS256, 30 min, claims: sub, token_version, type="access")
+  └── Genera refresh_token (HS256, 7 días, claims: sub, token_version, type="refresh")
         │
         ▼
-  Frontend guarda ambos en localStorage
+  Frontend guarda ambos tokens
   Access token se envía en cada request: Authorization: Bearer <token>
 
 [Request protegido]
   │
   ▼
   HTTPBearer extrae el token del header
-  verify_token() decodifica y valida claim type="access"
-  get_current_user() busca el usuario en DB por sub (username)
-  get_current_active_user() verifica is_active=True
-  require_permissions() verifica que el usuario tenga los permisos requeridos
-        │
-        ├── is_superuser=True → bypass, acceso concedido
-        └── Compara recurso:acción contra permisos heredados de roles activos
+  verify_token()       → valida firma, expiración y claim type="access"
+  get_current_user()   → busca usuario por sub (username)
+                         verifica token_version del JWT == token_version en DB
+                         (si difieren → 401: token revocado)
+  get_current_active_user() → verifica is_active=True
+  require_permissions() → obtiene permisos del cache (TTL 60 s) o los calcula
+                          superuser → permisos = {"*:*"}
+                          regular   → union de permisos de roles activos
+                          "*:*" en permisos → acceso total (wildcard)
+                          "recurso:acción" requerido no presente → 403
 
 [Token expirado (401)]
   │
   ▼
   Frontend intercepta el 401
-  POST /api/v1/auth/refresh (body JSON: refresh_token)
+  POST /api/v1/auth/refresh  ← rate limited: 30/min por IP
+  body JSON: {"refresh_token": "..."}
         │
-        ├── Refresh válido → nuevo access_token + refresh_token → reintenta request
-        └── Refresh inválido → dispara evento "auth:expired" → logout automático
+        ├── Refresh válido + token_version coincide → nuevo access + refresh → reintenta
+        └── Refresh inválido o token_version no coincide → logout automático
+
+[Logout / Revocación]
+  │
+  ▼
+POST /api/v1/auth/logout (requiere Bearer)
+  │
+  └── user.token_version += 1 (DB)
+      Todos los tokens existentes (access + refresh) quedan inválidos inmediatamente
+      Próximo request con token viejo → 401 (token_version no coincide)
+
+[Cambio de roles]
+  └── assign_roles_to_user() → token_version += 1 automáticamente
+      El usuario recibe permisos nuevos en el próximo login/refresh
 ```
 
-### 3.2 Cómo funciona `require_permissions()` — Backend
+### 3.2 Cómo funciona `require_permissions()` — implementación real
 
 Archivo: `backend/app/core/deps.py`
 
 ```python
+# Cache en memoria: key=(username, token_version), TTL=60s, máx 512 entradas
+_permissions_cache: TTLCache = TTLCache(maxsize=512, ttl=60)
+
+
+def get_user_permissions(user: User) -> set:
+    """Superusers obtienen wildcard; el resto hereda permisos de sus roles activos."""
+    if user.is_superuser:
+        return {"*:*"}
+    return {
+        f"{permission.resource}:{permission.action}"
+        for role in user.roles
+        if role.is_active
+        for permission in role.permissions
+        if permission.is_active
+    }
+
+
 def require_permissions(required_permissions: List[str]):
     def permission_checker(current_user: User = Depends(get_current_active_user)):
-        if current_user.is_superuser:
-            return current_user  # Superusers bypasan todo
-
-        user_permissions = [
-            f"{permission.resource}:{permission.action}"
-            for role in current_user.roles
-            if role.is_active                          # Solo roles activos
-            for permission in role.permissions
-            if permission.is_active                    # Solo permisos activos
-        ]
+        cache_key = (current_user.username, current_user.token_version)
+        cached = _permissions_cache.get(cache_key)
+        user_permissions = cached[1] if cached else get_user_permissions(current_user)
 
         for required in required_permissions:
-            if required not in user_permissions:
-                raise HTTPException(status_code=403, detail=f"Permission denied. Required: {required}")
-
+            if "*:*" not in user_permissions and required not in user_permissions:
+                raise HTTPException(
+                    status_code=403,
+                    detail=f"Permission denied. Required: {required}",
+                )
         return current_user
+
     return permission_checker
 ```
 
@@ -210,32 +248,62 @@ def listar_productos(
     ...
 ```
 
-**Helpers predefinidos** (agregar los propios en `deps.py`):
+**Helpers predefinidos:**
 ```python
 def require_user_read():
     return require_permissions(["users:read"])
 ```
 
-### 3.3 Tokens JWT — detalle
-
-Ambos tokens usan el claim `type` para evitar que un refresh token se use como access token y viceversa.
+### 3.3 Tokens JWT — estructura de claims
 
 ```python
-# security.py
+# Access token — expira en ACCESS_TOKEN_EXPIRE_MINUTES
+{
+    "sub": "username",
+    "token_version": 3,   # debe coincidir con user.token_version en DB
+    "type": "access",
+    "exp": <timestamp>
+}
 
-# Access token — expira en 30 min
-to_encode["type"] = "access"
-jwt.encode(to_encode, SECRET_KEY, algorithm="HS256")
-
-# Refresh token — expira en 7 días
-to_encode["type"] = "refresh"
-jwt.encode(to_encode, SECRET_KEY, algorithm="HS256")
+# Refresh token — expira en REFRESH_TOKEN_EXPIRE_DAYS
+{
+    "sub": "username",
+    "token_version": 3,
+    "type": "refresh",
+    "exp": <timestamp>
+}
 ```
 
-`verify_token()` rechaza cualquier token con `type != "access"`.
-`verify_refresh_token()` rechaza cualquier token con `type != "refresh"`.
+`verify_token()` rechaza tokens con `type != "access"`.
+`verify_refresh_token()` rechaza tokens con `type != "refresh"`.
+Ambos rechazan si `token_version` del token no coincide con el valor en DB.
 
-### 3.4 Manejo de refresh concurrente — Frontend
+### 3.4 Revocación de tokens mediante `token_version`
+
+El campo `token_version: int` en el modelo `User` actúa como versión de sesión. Cada vez que se incrementa, todos los tokens JWT anteriores quedan inválidos sin necesidad de blacklist ni Redis.
+
+| Evento | Efecto sobre `token_version` |
+|---|---|
+| `POST /auth/logout` | +1 (logout explícito) |
+| `PUT /users/{id}/roles` (asignar roles) | +1 (permisos cambiaron) |
+| `PUT /users/{id}` con `is_active=false` | +1 (cuenta desactivada) |
+
+**Trade-off:** Este enfoque invalida todos los tokens del usuario a la vez (no permite sesiones concurrentes independientes). Para tokens con granularidad por sesión se necesitaría un almacén externo (Redis).
+
+### 3.5 Cache de permisos en memoria
+
+```python
+# backend/app/core/deps.py
+_permissions_cache: TTLCache = TTLCache(maxsize=512, ttl=60)
+```
+
+- **Clave:** `(username, token_version)` — se invalida automáticamente cuando el token_version cambia.
+- **TTL:** 60 segundos. Un cambio de permisos en DB tarda hasta 60 s en reflejarse para sesiones activas.
+- **Tamaño máximo:** 512 entradas (ajustar según cantidad de usuarios concurrentes esperados).
+
+Si necesitas propagación inmediata de cambios de permisos sin cerrar sesión, reducir el TTL o limpiar la entrada manualmente tras modificar roles.
+
+### 3.6 Manejo de refresh concurrente — Frontend
 
 Archivo: `frontend/lib/api/client.ts`
 
@@ -250,10 +318,10 @@ if (this.isRefreshing && this.refreshPromise) {
 
 Una vez obtenido el nuevo token, todos los requests reintentados lo usan.
 
-### 3.5 Modelo de permisos
+### 3.7 Modelo de permisos RBAC
 
 ```
-Usuario → (N roles) → (N permisos)
+Usuario → (N roles activos) → (N permisos activos)
 
 Permiso = { resource: "productos", action: "read" }
           → name = "productos:read"
@@ -261,28 +329,131 @@ Permiso = { resource: "productos", action: "read" }
 
 **Acciones estándar:** `create`, `read`, `update`, `delete`, `export`
 
-Los permisos se heredan de **todos** los roles activos del usuario, sin jerarquía entre roles. Si un permiso está en cualquier rol activo, el usuario lo tiene.
+Los permisos se heredan de **todos** los roles activos del usuario. Si un permiso está en cualquier rol activo, el usuario lo tiene. No hay jerarquía entre roles.
 
-### 3.6 Registro de auditoría
+**Superusuario:** en lugar de un bypass especial (`if is_superuser: return True`), se le asigna el wildcard `{"*:*"}` como conjunto de permisos. `require_permissions()` lo trata igual que cualquier otro permiso, evitando lógica especial dispersa en el código.
 
-Todo endpoint que modifica datos llama a `audit_service.log()`:
+### 3.8 ABAC — Control basado en atributos del recurso
+
+El RBAC puro (`recurso:acción`) no distingue ownership: "puede leer sus propios pedidos vs los de otros". Para esos casos, usar `check_owner_or_permission()`:
+
+```python
+# backend/app/core/deps.py
+
+def check_owner_or_permission(resource_owner_id: Optional[int], current_user: User, permission: str) -> bool:
+    """True si el usuario es dueño del recurso (owner_id == user.id) O tiene el permiso requerido."""
+    cache_key = (current_user.username, current_user.token_version)
+    cached = _permissions_cache.get(cache_key)
+    user_permissions = cached[1] if cached else get_user_permissions(current_user)
+    if "*:*" in user_permissions or permission in user_permissions:
+        return True
+    return resource_owner_id is not None and current_user.id == resource_owner_id
+```
+
+**Patrón de uso en un endpoint:**
+
+```python
+@router.get("/{pedido_id}", response_model=PedidoRead)
+def get_pedido(
+    pedido_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+):
+    pedido = pedido_service.get(db, pedido_id)
+    if pedido is None:
+        raise HTTPException(404)
+    # Acceso si: tiene permiso "pedidos:read" O es el dueño del pedido
+    if not check_owner_or_permission(pedido.owner_id, current_user, "pedidos:read"):
+        raise HTTPException(403, "Permission denied")
+    return pedido
+```
+
+Para esto, el modelo del recurso debe tener un campo `owner_id: Optional[int]` con FK a `users.id`.
+
+**`require_owner_or_permission(permission)`** es un helper de dependencia que valida la sesión y entrega el `current_user`; la verificación de ownership se hace en el endpoint tras obtener el recurso:
+
+```python
+current_user: User = Depends(require_owner_or_permission("pedidos:read"))
+```
+
+### 3.9 Rate limiting
+
+Configurado en `backend/app/core/limiter.py` con `slowapi`:
+
+```python
+limiter = Limiter(key_func=get_remote_address)
+```
+
+Y aplicado como decorador en los endpoints sensibles:
+
+```python
+@router.post("/login")
+@limiter.limit(settings.RATE_LIMIT_LOGIN)   # default: "10/minute"
+async def login(request: Request, ...):
+    ...
+```
+
+Para agregar rate limiting a un endpoint propio:
+```python
+from app.core.limiter import limiter
+from app.core.config import settings
+
+@router.post("/mi-endpoint")
+@limiter.limit("5/minute")
+async def mi_endpoint(request: Request, ...):
+    ...
+```
+
+### 3.10 Registro de auditoría
+
+Campos registrados en cada evento:
+
+| Campo | Descripción |
+|---|---|
+| `user_id`, `username` | Actor (quien ejecuta la acción) |
+| `subject_id` | Sujeto (usuario afectado, si aplica) |
+| `action` | `create`, `update`, `delete`, `login`, `logout`, `password_change`, etc. |
+| `resource`, `resource_id` | Recurso afectado |
+| `before_data`, `after_data` | JSON con estado antes/después (diff) |
+| `status` | `success` o `failure` |
+| `ip_address`, `user_agent` | Contexto de red |
+| `request_id` | UUID por request para tracing |
+| `timestamp` | UTC automático |
+
+**Uso en un endpoint:**
 
 ```python
 from app.services.audit_service import audit_service
 
+# Éxito
 audit_service.log(
     db=db,
+    action="create",
+    resource="pedidos",
+    resource_id=pedido.id,
     user_id=current_user.id,
     username=current_user.username,
-    action="create",          # create | update | delete | login | logout
-    resource="productos",
-    resource_id=str(nuevo.id),
-    details={"nombre": nuevo.nombre},
-    ip_address=request.client.host,
+    subject_id=pedido.owner_id,        # opcional: usuario afectado
+    before_data=None,
+    after_data=json.dumps({"total": pedido.total}),
+    ip=request.client.host,
+    request_id=getattr(request.state, "request_id", None),
+    user_agent=request.headers.get("user-agent"),
+)
+
+# Fallo (login incorrecto, permiso denegado, etc.)
+audit_service.log_failure(
+    db=db,
+    action="login",
+    resource="auth",
+    details="Failed login attempt for username: unknown",
+    ip=ip,
+    request_id=rid,
+    user_agent=ua,
 )
 ```
 
-Los logs son consultables vía `GET /api/v1/audit/logs` (requiere `audit:read`).
+Los logs son consultables vía `GET /api/v1/audit/logs` (requiere permiso `audit:read`).
 
 ---
 
@@ -327,7 +498,6 @@ permissions_data = [
     {"name": "productos:update", "resource": "productos", "action": "update", "description": "Editar productos"},
     {"name": "productos:delete", "resource": "productos", "action": "delete", "description": "Eliminar productos"},
     {"name": "productos:export", "resource": "productos", "action": "export", "description": "Exportar productos"},
-    # ...
 ]
 ```
 
@@ -344,7 +514,6 @@ roles_data = [
     {"name": "Consultor",      "description": "Solo lectura"},
 ]
 
-# Asignación de permisos por rol (después de crear los roles)
 admin = next(r for r in roles if r.name == "Administrador")
 admin.permissions = [p for p in permissions if p.name not in ["permissions:delete"]]
 
@@ -390,34 +559,47 @@ class Producto(SQLModel, table=True):
     nombre: str = Field(index=True)
     descripcion: Optional[str] = None
     precio: float
+    owner_id: Optional[int] = Field(
+        default=None,
+        sa_column=Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True),
+    )
     is_active: bool = Field(default=True)
-    created_at: datetime = Field(default_factory=datetime.utcnow)
-    updated_at: Optional[datetime] = None
+    created_at: Optional[datetime] = Field(
+        default=None,
+        sa_column=Column(DateTime(timezone=True), server_default=func.now()),
+    )
+    updated_at: Optional[datetime] = Field(
+        default=None,
+        sa_column=Column(DateTime(timezone=True), onupdate=func.now(), nullable=True),
+    )
 ```
+
+> Incluir `owner_id` si el recurso tiene concept de propietario (necesario para ABAC).
 
 ### 5.2 Schemas Pydantic
 
 `backend/app/schemas/schemas.py`
 
 ```python
-class ProductoCreate(BaseModel):
+class ProductoCreate(SQLModel):
     nombre: str
     descripcion: Optional[str] = None
     precio: float
 
-class ProductoUpdate(BaseModel):
+class ProductoUpdate(SQLModel):
     nombre: Optional[str] = None
     descripcion: Optional[str] = None
     precio: Optional[float] = None
     is_active: Optional[bool] = None
 
-class ProductoRead(BaseModel):
+class ProductoRead(SQLModel):
     id: int
     nombre: str
     descripcion: Optional[str]
     precio: float
+    owner_id: Optional[int]
     is_active: bool
-    created_at: datetime
+    created_at: Optional[datetime]
 ```
 
 ### 5.3 Servicio CRUD
@@ -429,11 +611,11 @@ class ProductoService:
     def get(self, db: Session, id: int) -> Optional[Producto]:
         return db.get(Producto, id)
 
-    def get_all(self, db: Session, skip: int = 0, limit: int = 100):
+    def get_all(self, db: Session, skip: int = 0, limit: int = 100) -> List[Producto]:
         return db.exec(select(Producto).offset(skip).limit(limit)).all()
 
-    def create(self, db: Session, data: ProductoCreate) -> Producto:
-        producto = Producto(**data.model_dump())
+    def create(self, db: Session, data: ProductoCreate, owner_id: Optional[int] = None) -> Producto:
+        producto = Producto(**data.model_dump(), owner_id=owner_id)
         db.add(producto)
         db.commit()
         db.refresh(producto)
@@ -445,7 +627,6 @@ class ProductoService:
             return None
         for key, value in data.model_dump(exclude_unset=True).items():
             setattr(producto, key, value)
-        producto.updated_at = datetime.utcnow()
         db.commit()
         db.refresh(producto)
         return producto
@@ -461,21 +642,31 @@ class ProductoService:
 producto_service = ProductoService()
 ```
 
-### 5.4 Endpoint con permisos y auditoría
+### 5.4 Endpoint con permisos, ABAC y auditoría
 
 `backend/app/api/productos.py`
 
 ```python
+import json
 from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlmodel import Session
 from app.db.database import get_db
-from app.core.deps import require_permissions
+from app.core.deps import require_permissions, get_current_active_user, check_owner_or_permission
 from app.models.models import User
 from app.services.crud import producto_service
 from app.services.audit_service import audit_service
 from app.schemas.schemas import ProductoCreate, ProductoRead, ProductoUpdate
 
 router = APIRouter(prefix="/productos", tags=["productos"])
+
+
+def _meta(request: Request):
+    return (
+        getattr(request.state, "request_id", None),
+        request.headers.get("user-agent"),
+        request.client.host if request.client else None,
+    )
+
 
 @router.get("/", response_model=list[ProductoRead])
 def listar_productos(
@@ -484,6 +675,22 @@ def listar_productos(
 ):
     return producto_service.get_all(db)
 
+
+@router.get("/{producto_id}", response_model=ProductoRead)
+def get_producto(
+    producto_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+):
+    producto = producto_service.get(db, producto_id)
+    if not producto:
+        raise HTTPException(404, "Producto no encontrado")
+    # ABAC: dueño del recurso O tiene permiso explícito
+    if not check_owner_or_permission(producto.owner_id, current_user, "productos:read"):
+        raise HTTPException(403, "Permission denied")
+    return producto
+
+
 @router.post("/", response_model=ProductoRead, status_code=201)
 def crear_producto(
     data: ProductoCreate,
@@ -491,18 +698,14 @@ def crear_producto(
     db: Session = Depends(get_db),
     current_user: User = Depends(require_permissions(["productos:create"])),
 ):
-    producto = producto_service.create(db, data)
-    audit_service.log(
-        db=db,
-        user_id=current_user.id,
-        username=current_user.username,
-        action="create",
-        resource="productos",
-        resource_id=str(producto.id),
-        details={"nombre": producto.nombre},
-        ip_address=request.client.host,
-    )
+    rid, ua, ip = _meta(request)
+    producto = producto_service.create(db, data, owner_id=current_user.id)
+    audit_service.log(db, action="create", resource="productos", resource_id=producto.id,
+                      user_id=current_user.id, username=current_user.username,
+                      after_data=json.dumps({"nombre": producto.nombre}),
+                      ip=ip, request_id=rid, user_agent=ua)
     return producto
+
 
 @router.put("/{producto_id}", response_model=ProductoRead)
 def actualizar_producto(
@@ -510,15 +713,23 @@ def actualizar_producto(
     data: ProductoUpdate,
     request: Request,
     db: Session = Depends(get_db),
-    current_user: User = Depends(require_permissions(["productos:update"])),
+    current_user: User = Depends(get_current_active_user),
 ):
-    producto = producto_service.update(db, producto_id, data)
+    rid, ua, ip = _meta(request)
+    producto = producto_service.get(db, producto_id)
     if not producto:
-        raise HTTPException(status_code=404, detail="Producto no encontrado")
-    audit_service.log(db=db, user_id=current_user.id, username=current_user.username,
-                      action="update", resource="productos", resource_id=str(producto_id),
-                      details=data.model_dump(exclude_unset=True), ip_address=request.client.host)
-    return producto
+        raise HTTPException(404, "Producto no encontrado")
+    if not check_owner_or_permission(producto.owner_id, current_user, "productos:update"):
+        raise HTTPException(403, "Permission denied")
+    before = json.dumps({"nombre": producto.nombre, "precio": producto.precio})
+    result = producto_service.update(db, producto_id, data)
+    audit_service.log(db, action="update", resource="productos", resource_id=producto_id,
+                      user_id=current_user.id, username=current_user.username,
+                      before_data=before,
+                      after_data=json.dumps(data.model_dump(exclude_unset=True)),
+                      ip=ip, request_id=rid, user_agent=ua)
+    return result
+
 
 @router.delete("/{producto_id}", status_code=204)
 def eliminar_producto(
@@ -527,26 +738,29 @@ def eliminar_producto(
     db: Session = Depends(get_db),
     current_user: User = Depends(require_permissions(["productos:delete"])),
 ):
+    rid, ua, ip = _meta(request)
+    producto = producto_service.get(db, producto_id)
+    before = json.dumps({"nombre": producto.nombre if producto else None})
     if not producto_service.delete(db, producto_id):
-        raise HTTPException(status_code=404, detail="Producto no encontrado")
-    audit_service.log(db=db, user_id=current_user.id, username=current_user.username,
-                      action="delete", resource="productos", resource_id=str(producto_id),
-                      details={}, ip_address=request.client.host)
+        raise HTTPException(404, "Producto no encontrado")
+    audit_service.log(db, action="delete", resource="productos", resource_id=producto_id,
+                      user_id=current_user.id, username=current_user.username,
+                      before_data=before, ip=ip, request_id=rid, user_agent=ua)
 ```
 
 ### 5.5 Registrar el router
 
-`backend/app/main.py`
+`backend/app/api/__init__.py`
 
 ```python
 from app.api import productos
 
-app.include_router(productos.router, prefix=settings.API_V1_STR)
+api_router.include_router(productos.router, prefix=settings.API_V1_STR)
 ```
 
 ### 5.6 Actualizar la lista de recursos disponibles
 
-El endpoint `/permissions/resources/available` tiene los recursos **hardcodeados**. Al agregar un recurso nuevo, actualizarlo en `backend/app/api/permissions.py`:
+El endpoint `/permissions/resources/available` tiene los recursos hardcodeados. Al agregar un recurso nuevo, actualizarlo en `backend/app/api/permissions.py`:
 
 ```python
 @router.get("/resources/available")
@@ -559,8 +773,6 @@ def get_available_resources(current_user: User = Depends(require_permission_read
         ]
     }
 ```
-
-Sin este paso, la UI de administración de permisos no mostrará el nuevo recurso en el selector.
 
 ### 5.7 Migración Alembic
 
@@ -586,6 +798,7 @@ export interface Producto {
   nombre: string;
   descripcion?: string;
   precio: number;
+  owner_id?: number;
   is_active: boolean;
   created_at: string;
   updated_at?: string;
@@ -637,7 +850,7 @@ export const productoService = {
 
 ### 6.3 Crear la página
 
-Crear el archivo `frontend/app/productos/page.tsx`. El patrón estándar combina la guarda de auth, la carga de datos y los controles protegidos por permiso:
+`frontend/app/productos/page.tsx`
 
 ```tsx
 'use client';
@@ -658,7 +871,6 @@ export default function ProductosPage() {
   const [productos, setProductos] = useState<Producto[]>([]);
   const [loading, setLoading] = useState(true);
 
-  // Guarda de autenticación y permiso mínimo
   useEffect(() => {
     if (!isLoading && !isAuthenticated) router.push('/login');
     if (!isLoading && isAuthenticated && !hasPermission('productos:read')) router.push('/dashboard');
@@ -688,20 +900,14 @@ export default function ProductosPage() {
         <div className="flex justify-between items-center">
           <h1 className="text-xl font-semibold">Productos</h1>
 
-          {/* Solo visible si tiene permiso de crear */}
           <ProtectedComponent permissions={['productos:create']}>
-            <button onClick={() => { /* abrir modal */ }}>
-              Nuevo producto
-            </button>
+            <button onClick={() => { /* abrir modal */ }}>Nuevo producto</button>
           </ProtectedComponent>
         </div>
 
-        {/* Tabla de datos */}
         {productos.map(p => (
           <div key={p.id}>
             <span>{p.nombre}</span>
-
-            {/* Acciones protegidas individualmente */}
             <ProtectedComponent permissions={['productos:update']}>
               <button onClick={() => { /* editar */ }}>Editar</button>
             </ProtectedComponent>
@@ -716,36 +922,32 @@ export default function ProductosPage() {
 }
 ```
 
+> **Regla importante:** `ProtectedComponent` y `hasPermission()` son UX — ocultan elementos para mejorar la experiencia. El enforcement real ocurre **siempre** en el backend. Nunca confiar en la UI para proteger datos.
+
 ### 6.4 Agregar al sidebar de navegación
 
 `frontend/components/layout/Sidebar.tsx`
 
-Agregar una entrada al array `navItems` con el ícono, la ruta y el permiso requerido para verla. El sidebar oculta automáticamente los ítems que el usuario no puede ver.
-
 ```tsx
-import { Package } from 'lucide-react'; // elegir ícono de lucide-react
+import { Package } from 'lucide-react';
 
 const navItems: NavItem[] = [
   { label: 'Dashboard',   href: '/dashboard',   icon: LayoutDashboard, permissions: ['dashboard:read'] },
   { label: 'Mi Perfil',   href: '/profile',     icon: User },
   { label: 'Usuarios',    href: '/users',        icon: Users,           permissions: ['users:read'] },
-  { label: 'Productos',   href: '/productos',    icon: Package,         permissions: ['productos:read'] }, // ← nueva entrada
+  { label: 'Productos',   href: '/productos',    icon: Package,         permissions: ['productos:read'] },
   { label: 'Roles',       href: '/roles',        icon: Shield,          permissions: ['roles:read'] },
   { label: 'Permisos',    href: '/permissions',  icon: Key,             permissions: ['permissions:read'] },
   { label: 'Auditoría',   href: '/audit',        icon: ClipboardList,   permissions: ['audit:read'] },
 ];
 ```
 
-Los ítems sin `permissions` siempre se muestran (como "Mi Perfil"). El sidebar ya maneja el filtrado con `ProtectedComponent` internamente.
-
 ### 6.5 Proteger secciones de UI con `ProtectedComponent`
 
 ```tsx
-import ProtectedComponent from '@/components/common/ProtectedComponent';
-
-// Botón visible solo con un permiso específico
+// Visible con un permiso específico
 <ProtectedComponent permissions={['productos:create']}>
-  <Button onClick={handleCreate}>Nuevo Producto</Button>
+  <Button>Nuevo Producto</Button>
 </ProtectedComponent>
 
 // Visible si tiene ALGUNO de los permisos
@@ -761,24 +963,22 @@ import ProtectedComponent from '@/components/common/ProtectedComponent';
 
 ### 6.6 Verificar permisos directamente en código
 
-Usar `useAuth` cuando la lógica es más compleja que mostrar/ocultar un elemento:
-
 ```tsx
 import { useAuth } from '@/context/AuthContext';
 
 function FilaProducto({ producto }: { producto: Producto }) {
   const { hasPermission, hasAnyPermission } = useAuth();
 
-  const puedeEditar  = hasPermission('productos:update');
+  const puedeEditar   = hasPermission('productos:update');
   const puedeEliminar = hasPermission('productos:delete');
-  const puedeActuar  = hasAnyPermission(['productos:update', 'productos:delete']);
+  const puedeActuar   = hasAnyPermission(['productos:update', 'productos:delete']);
 
   return (
     <tr>
       <td>{producto.nombre}</td>
       {puedeActuar && (
         <td>
-          {puedeEditar  && <button>Editar</button>}
+          {puedeEditar   && <button>Editar</button>}
           {puedeEliminar && <button>Eliminar</button>}
         </td>
       )}
@@ -796,8 +996,8 @@ function FilaProducto({ producto }: { producto: Producto }) {
 ```env
 # Backend
 SECRET_KEY=<mínimo 64 chars aleatorios, nunca el default>
-ACCESS_TOKEN_EXPIRE_MINUTES=30     # ajustar según sensibilidad del sistema
-REFRESH_TOKEN_EXPIRE_DAYS=7        # ajustar según política de sesiones
+ACCESS_TOKEN_EXPIRE_MINUTES=30
+REFRESH_TOKEN_EXPIRE_DAYS=7
 
 POSTGRES_SERVER=<host-produccion>
 POSTGRES_USER=<usuario-especifico-del-proyecto>
@@ -805,6 +1005,9 @@ POSTGRES_PASSWORD=<password-fuerte>
 POSTGRES_DB=<db-especifica-del-proyecto>
 
 BACKEND_CORS_ORIGINS=["https://mi-dominio.com"]
+
+RATE_LIMIT_LOGIN=10/minute
+RATE_LIMIT_REFRESH=30/minute
 
 # Frontend
 NEXT_PUBLIC_API_URL=https://api.mi-dominio.com/api/v1
@@ -818,8 +1021,10 @@ NEXT_PUBLIC_API_URL=https://api.mi-dominio.com/api/v1
 - [ ] PostgreSQL no expuesto públicamente (acceso solo desde la red interna)
 - [ ] HTTPS configurado (nginx/caddy como reverse proxy)
 - [ ] Variables de entorno en el servidor, nunca en el repositorio
-- [ ] `DEBUG=False` / modo producción en FastAPI si se agrega esa variable
-- [ ] Revisar que `_debug` files no estén en producción (`.gitignore` o eliminar)
+- [ ] Revisar que `_debug` files no estén en producción
+- [ ] Rate limiting configurado y probado (`RATE_LIMIT_LOGIN`, `RATE_LIMIT_REFRESH`)
+- [ ] Cache TTL de permisos revisado (`TTLCache ttl=60` en `deps.py`)
+- [ ] Validar que endpoints sensibles nuevos tienen `@limiter.limit(...)` si corresponde
 
 ### Generar SECRET_KEY
 
@@ -829,7 +1034,52 @@ python -c "import secrets; print(secrets.token_hex(32))"
 
 ---
 
-## 8. Referencia rápida
+## 8. Limitaciones conocidas y evolución futura
+
+Esta sección describe las limitaciones del template actual y los caminos de evolución para proyectos que crecen en complejidad.
+
+### 8.1 ABAC limitado
+
+El template implementa RBAC puro con ownership básico (`check_owner_or_permission`). **No cubre** reglas como:
+- "puede ver vuelos de su región"
+- "puede editar si está asignado como responsable"
+- "acceso basado en atributos del recurso o del usuario"
+
+**Evolución:** Si el dominio requiere estas reglas, agregar una capa ABAC sobre el RBAC:
+
+```python
+def can_edit_pedido(user: User, pedido: Pedido) -> bool:
+    return (
+        user.has_permission("pedidos:update") and
+        (pedido.owner_id == user.id or user.region == pedido.region)
+    )
+```
+
+Centralizar estas funciones en un módulo `app/core/policies.py`.
+
+### 8.2 Revocación de tokens por sesión
+
+El `token_version` invalida **todos** los tokens del usuario a la vez. No permite invalidar una sesión específica entre varias concurrentes (ej.: cerrar sesión solo en el móvil).
+
+**Evolución:** Para sesiones independientes, agregar una tabla `sessions` con un `session_id` en el claim JWT y una blacklist en Redis o en DB.
+
+### 8.3 Multi-tenancy
+
+El template no tiene soporte para múltiples tenants (clientes/organizaciones). Roles y permisos son globales.
+
+**Evolución:** Agregar `tenant_id: int` a las tablas `users`, `roles`, `permissions`, y filtrar todas las queries por `tenant_id`. Este cambio es invasivo — mejor planificarlo desde el inicio si el proyecto lo requiere.
+
+### 8.4 Acoplamiento Auth ↔ negocio
+
+Auth, usuarios, roles y permisos viven en el mismo servicio. Esto es correcto para proyectos medianos. Si el sistema escala a múltiples servicios que necesitan autenticación:
+
+**Evolución natural:**
+1. Extraer el módulo de auth a un servicio IAM independiente
+2. Los servicios de negocio validan tokens contra el IAM (via introspection endpoint o shared secret)
+
+---
+
+## 9. Referencia rápida
 
 ### Estructura de archivos clave
 
@@ -838,8 +1088,9 @@ backend/
 ├── app/
 │   ├── core/
 │   │   ├── config.py        # Settings (Pydantic), variables de entorno
-│   │   ├── security.py      # JWT, bcrypt — no modificar salvo agregar algoritmos
-│   │   └── deps.py          # Dependencias de FastAPI: get_current_user, require_permissions
+│   │   ├── security.py      # JWT, bcrypt — create/verify access y refresh tokens
+│   │   ├── deps.py          # get_current_user, require_permissions, check_owner_or_permission
+│   │   └── limiter.py       # slowapi rate limiter
 │   ├── models/
 │   │   └── models.py        # Tablas SQLModel: User, Role, Permission, AuditLog
 │   ├── schemas/
@@ -861,7 +1112,7 @@ backend/
 
 frontend/
 ├── context/
-│   ├── AuthContext.tsx      # Estado global de auth: user, token, login, logout, hasPermission
+│   ├── AuthContext.tsx      # Estado global: user, token, login, logout, hasPermission
 │   ├── ThemeContext.tsx     # Dark/light mode
 │   └── ToastContext.tsx     # Notificaciones
 ├── lib/
@@ -870,7 +1121,7 @@ frontend/
 │       └── services.ts      # Servicios por recurso: userService, roleService, etc.
 ├── components/
 │   └── common/
-│       └── ProtectedComponent.tsx  # Muestra/oculta UI según permisos
+│       └── ProtectedComponent.tsx  # Muestra/oculta UI según permisos (solo UX)
 ├── types/
 │   └── index.ts             # Interfaces TypeScript: User, Role, Permission, etc.
 └── app/                     # Páginas Next.js App Router
@@ -906,19 +1157,19 @@ docker compose logs -f postgres
 | Método | Endpoint | Body | Descripción |
 |---|---|---|---|
 | POST | `/api/v1/auth/login` | `username`, `password` (form-data) | Login, retorna access + refresh token |
-| POST | `/api/v1/auth/refresh` | `{"refresh_token": "..."}` | Renueva access token |
-| POST | `/api/v1/auth/logout` | — (requiere Bearer) | Logout (auditado) |
+| POST | `/api/v1/auth/refresh` | `{"refresh_token": "..."}` | Renueva access + refresh token |
+| POST | `/api/v1/auth/logout` | — (requiere Bearer) | Logout: invalida todos los tokens (auditado) |
 
 ### Checklist completo para un nuevo recurso
 
 **Backend:**
 ```
-1. models/models.py          → Clase SQLModel con table=True
+1. models/models.py          → Clase SQLModel con table=True (incluir owner_id si aplica ABAC)
 2. schemas/schemas.py        → DTOs Create / Read / Update
 3. services/crud.py          → Clase XService con get/get_all/create/update/delete + singleton
-4. api/X.py                  → Router con endpoints y require_permissions(["X:action"])
-5. main.py                   → app.include_router(X.router, prefix=settings.API_V1_STR)
-6. api/permissions.py        → Agregar "X" a la lista de resources/available
+4. api/X.py                  → Router con endpoints, require_permissions y check_owner_or_permission
+5. api/__init__.py           → api_router.include_router(X.router, ...)
+6. api/permissions.py        → Agregar "X" a la lista resources/available
 7. db/init_db.py             → Permisos X:create/read/update/delete y asignarlos a roles
 8. core/deps.py              → Helpers opcionales require_X_read(), require_X_create(), etc.
 9. alembic                   → alembic revision --autogenerate -m "add X table"
@@ -932,4 +1183,19 @@ docker compose logs -f postgres
 3. app/X/page.tsx            → Página con guarda de auth + fetchData + DashboardLayout
 4. components/layout/Sidebar.tsx → Entrada en navItems con permissions: ["X:read"]
 5. En la página              → ProtectedComponent para botones de crear/editar/eliminar
+```
+
+### Flujo completo de revocación de tokens
+
+```
+Cambio que requiere invalidación → token_version += 1 en DB
+                                      │
+        ┌─────────────────────────────┼───────────────────────────┐
+        ▼                             ▼                           ▼
+  POST /auth/logout           assign_roles_to_user()       user.is_active = False
+  (logout explícito)          (permisos cambiaron)         (cuenta desactivada)
+
+Próximo request del usuario con token viejo:
+  verify_token() ok (firma válida, no expirado)
+  get_current_user() → token_version del JWT != DB → 401 "Could not validate credentials"
 ```

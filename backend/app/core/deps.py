@@ -96,6 +96,21 @@ def check_owner_or_permission(resource_owner_id: Optional[int], current_user: Us
     return resource_owner_id is not None and current_user.id == resource_owner_id
 
 
+def require_owner_or_permission(permission: str):
+    """
+    Dependencia ABAC: inyecta current_user validado para endpoints donde el acceso
+    se permite si el usuario es dueño del recurso O tiene el permiso indicado.
+
+    Uso en el endpoint:
+        current_user = Depends(require_owner_or_permission("items:read"))
+        if not check_owner_or_permission(item.owner_id, current_user, "items:read"):
+            raise HTTPException(403)
+    """
+    def dependency(current_user: User = Depends(get_current_active_user)) -> User:
+        return current_user
+    return dependency
+
+
 def require_user_read():
     return require_permissions(["users:read"])
 
