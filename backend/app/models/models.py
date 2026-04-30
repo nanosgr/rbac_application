@@ -203,9 +203,32 @@ class AuditLog(SQLModel, table=True):
     )
 
 
+# ---------------------------------------------------------------------------
+# PasswordResetToken
+# ---------------------------------------------------------------------------
+
+class PasswordResetToken(SQLModel, table=True):
+    __tablename__ = "password_reset_tokens"
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    user_id: int = Field(
+        sa_column=Column(Integer, ForeignKey("users.id", ondelete="CASCADE"))
+    )
+    token_hash: str = Field(index=True)
+    expires_at: datetime
+    used: bool = Field(default=False)
+    used_at: Optional[datetime] = None
+    ip_requested: Optional[str] = None
+    created_at: Optional[datetime] = Field(
+        default=None,
+        sa_column=Column(DateTime(timezone=True), server_default=func.now()),
+    )
+
+
 # Resolver referencias circulares
 Permission.model_rebuild()
 Role.model_rebuild()
 User.model_rebuild()
 RoleRead.model_rebuild()
 UserRead.model_rebuild()
+PasswordResetToken.model_rebuild()

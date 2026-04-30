@@ -39,6 +39,23 @@ class Settings(BaseSettings):
     RATE_LIMIT_LOGIN: str = "10/minute"
     RATE_LIMIT_REFRESH: str = "30/minute"
 
+    # SMTP
+    SMTP_HOST: str = "localhost"
+    SMTP_PORT: int = 587
+    SMTP_TLS: bool = True
+    SMTP_USER: Optional[str] = None
+    SMTP_PASSWORD: Optional[str] = None
+    SMTP_FROM: str = "noreply@example.com"
+    SMTP_FROM_NAME: str = "RBAC Application"
+
+    # Password reset
+    RESET_TOKEN_EXPIRE_MINUTES: int = 30
+    FRONTEND_URL: str = "http://localhost:3000"
+
+    # Rate limiting for password reset
+    RATE_LIMIT_RESET_REQUEST: str = "5/hour"
+    RATE_LIMIT_RESET_CONFIRM: str = "10/hour"
+
     # CORS
     BACKEND_CORS_ORIGINS: List[str] = ["http://localhost:3000", "http://localhost:8080", "http://localhost:5173"]
     

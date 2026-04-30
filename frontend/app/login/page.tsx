@@ -79,6 +79,15 @@ export default function LoginPage() {
             >
               {isLoading ? 'Verificando...' : 'Iniciar sesión'}
             </Button>
+
+            <div className="text-center pt-1">
+              <a
+                href="/forgot-password"
+                className="text-xs text-stone-400 dark:text-stone-500 hover:text-stone-700 dark:hover:text-stone-300 transition-colors"
+              >
+                ¿Olvidaste tu contraseña?
+              </a>
+            </div>
           </form>
         </div>
 

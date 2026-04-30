@@ -17,6 +17,8 @@ import {
   GetRolesParams,
   GetPermissionsParams,
   GetAuditLogsParams,
+  PasswordResetRequestDTO,
+  PasswordResetConfirmDTO,
 } from '@/types';
 
 function buildQuery(params: Record<string, string | number | boolean | undefined>): string {
@@ -109,4 +111,13 @@ export const permissionService = {
 export const auditService = {
   getLogs: (params: GetAuditLogsParams = {}) =>
     apiClient.get<PaginatedResponse<AuditLog>>(`/audit/logs${buildQuery(params as Record<string, string | number | boolean | undefined>)}`),
+};
+
+// Auth Service (public endpoints — no requieren token)
+export const authService = {
+  requestPasswordReset: (data: PasswordResetRequestDTO) =>
+    apiClient.post<{ message: string }>('/auth/password-reset/request', data),
+
+  confirmPasswordReset: (data: PasswordResetConfirmDTO) =>
+    apiClient.post<{ message: string }>('/auth/password-reset/confirm', data),
 };

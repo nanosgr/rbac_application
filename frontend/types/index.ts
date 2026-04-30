@@ -202,3 +202,13 @@ export interface TableAction<T> {
   permission?: string;
   variant?: 'primary' | 'secondary' | 'danger';
 }
+
+// Password reset DTOs
+export interface PasswordResetRequestDTO {
+  identifier: string;
+}
+
+export interface PasswordResetConfirmDTO {
+  token: string;
+  new_password: string;
+}

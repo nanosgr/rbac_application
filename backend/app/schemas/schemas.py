@@ -49,6 +49,15 @@ class PasswordChange(SQLModel):
     new_password: str = Field(min_length=8)
 
 
+class PasswordResetRequest(SQLModel):
+    identifier: str  # email o username
+
+
+class PasswordResetConfirm(SQLModel):
+    token: str
+    new_password: str = Field(min_length=8)
+
+
 class AuditLogRead(SQLModel):
     id: int
     user_id: Optional[int] = None

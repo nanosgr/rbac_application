@@ -9,12 +9,13 @@ Referencia personal para arrancar nuevos proyectos basados en este template. Cub
 1. [Qué ofrece este template](#1-qué-ofrece-este-template)
 2. [Setup inicial de un nuevo proyecto](#2-setup-inicial-de-un-nuevo-proyecto)
 3. [Arquitectura de seguridad](#3-arquitectura-de-seguridad)
-4. [Adaptar el RBAC a un nuevo dominio](#4-adaptar-el-rbac-a-un-nuevo-dominio)
-5. [Agregar un nuevo recurso — Backend](#5-agregar-un-nuevo-recurso-protegido)
-6. [Agregar un nuevo recurso — Frontend](#6-nueva-página-en-el-frontend)
-7. [Variables de entorno y checklist de producción](#7-variables-de-entorno-y-checklist-de-producción)
-8. [Limitaciones conocidas y evolución futura](#8-limitaciones-conocidas-y-evolución-futura)
-9. [Referencia rápida](#9-referencia-rápida)
+4. [Recupero de contraseña](#4-recupero-de-contraseña)
+5. [Adaptar el RBAC a un nuevo dominio](#5-adaptar-el-rbac-a-un-nuevo-dominio)
+6. [Agregar un nuevo recurso — Backend](#6-agregar-un-nuevo-recurso-protegido)
+7. [Agregar un nuevo recurso — Frontend](#7-nueva-página-en-el-frontend)
+8. [Variables de entorno y checklist de producción](#8-variables-de-entorno-y-checklist-de-producción)
+9. [Limitaciones conocidas y evolución futura](#9-limitaciones-conocidas-y-evolución-futura)
+10. [Referencia rápida](#10-referencia-rápida)
 
 ---
 
@@ -457,7 +458,142 @@ Los logs son consultables vía `GET /api/v1/audit/logs` (requiere permiso `audit
 
 ---
 
-## 4. Adaptar el RBAC a un nuevo dominio
+## 4. Recupero de contraseña
+
+### 4.1 Diseño de seguridad
+
+| Decisión | Implementación |
+|---|---|
+| Generación del token | `secrets.token_urlsafe(32)` — 256 bits de entropía |
+| Almacenamiento | Hash SHA-256 en DB (`password_reset_tokens.token_hash`) — nunca el token crudo |
+| Expiración | 30 minutos (configurable con `RESET_TOKEN_EXPIRE_MINUTES`) |
+| Uso único | `used=True` + `used_at` al consumirlo; tokens usados no se aceptan |
+| Invalidación previa | Al crear un token nuevo, los pendientes del mismo usuario se eliminan |
+| Anti-enumeración | Siempre se retorna la misma respuesta genérica, exista o no el usuario |
+| Envío de email | `BackgroundTask` — el endpoint responde inmediatamente sin esperar el SMTP |
+| Rate limiting | `/request`: 5/hour · `/confirm`: 10/hour (ambos por IP) |
+| JWT invalidation | `token_version += 1` tras reset exitoso → todos los tokens activos quedan inválidos |
+| Auditoría | `password_reset_request` y `password_reset_confirm` en `audit_logs` |
+
+### 4.2 Flujo completo
+
+```
+[Usuario en /login]
+  └── click "¿Olvidaste tu contraseña?" → /forgot-password
+
+[/forgot-password]
+  └── POST /api/v1/auth/password-reset/request
+      body: {"identifier": "email@ejemplo.com"}  ← acepta email o username
+      rate limited: 5/hour por IP
+        │
+        ├── Usuario no encontrado / inactivo → respuesta genérica (no revela nada)
+        └── Usuario encontrado:
+              1. Invalida tokens pendientes anteriores
+              2. Genera raw_token = secrets.token_urlsafe(32)
+              3. Guarda SHA-256(raw_token) en password_reset_tokens
+              4. Envía email en background → link: {FRONTEND_URL}/reset-password?token={raw_token}
+              5. Retorna respuesta genérica
+              6. Registra en audit_logs
+
+[Email recibido → /reset-password?token=<raw_token>]
+  └── POST /api/v1/auth/password-reset/confirm
+      body: {"token": "<raw_token>", "new_password": "nueva123"}
+      rate limited: 10/hour por IP
+        │
+        ├── SHA-256(token) no encontrado, used=True, o expirado → 400
+        └── Token válido:
+              1. token.used = True + token.used_at = now()
+              2. user.hashed_password = bcrypt(nueva_contraseña)
+              3. user.token_version += 1 (invalida todos los JWT activos)
+              4. Retorna 200 con mensaje de éxito
+              5. Registra en audit_logs
+```
+
+### 4.3 Tabla `password_reset_tokens`
+
+| Campo | Tipo | Descripción |
+|---|---|---|
+| `id` | int PK | — |
+| `user_id` | int FK → users(CASCADE) | Propietario del token |
+| `token_hash` | str (indexed) | SHA-256 del token enviado por email |
+| `expires_at` | datetime tz | Momento de expiración |
+| `used` | bool | `True` si ya fue consumido |
+| `used_at` | datetime tz | Cuándo fue usado |
+| `ip_requested` | str | IP que solicitó el reset |
+| `created_at` | datetime tz | Creación automática |
+
+### 4.4 Configurar SMTP en `.env`
+
+```env
+# SMTP corporativo
+SMTP_HOST=mail.empresa.com
+SMTP_PORT=587
+SMTP_TLS=true
+SMTP_USER=noreply@empresa.com
+SMTP_PASSWORD=<password-smtp>
+SMTP_FROM=noreply@empresa.com
+SMTP_FROM_NAME=Mi Proyecto
+
+# Password reset
+RESET_TOKEN_EXPIRE_MINUTES=30
+FRONTEND_URL=https://mi-dominio.com
+```
+
+Para SMTP sin autenticación (relay interno):
+```env
+SMTP_HOST=relay.interno.empresa.com
+SMTP_PORT=25
+SMTP_TLS=false
+# SMTP_USER y SMTP_PASSWORD se omiten
+```
+
+### 4.5 Migración de base de datos
+
+Al usar el template por primera vez o al actualizar desde una versión anterior:
+
+```bash
+cd backend
+source venv/bin/activate
+alembic upgrade head
+```
+
+La migración `e4f5a6b7c8d9` crea la tabla `password_reset_tokens`.
+
+### 4.6 Nuevos endpoints
+
+| Método | Endpoint | Autenticación | Rate limit |
+|---|---|---|---|
+| POST | `/api/v1/auth/password-reset/request` | No requerida | 5/hour por IP |
+| POST | `/api/v1/auth/password-reset/confirm` | No requerida | 10/hour por IP |
+
+### 4.7 Páginas del frontend
+
+| Ruta | Descripción |
+|---|---|
+| `/forgot-password` | Formulario para solicitar el reset (acepta email o username) |
+| `/reset-password?token=<token>` | Formulario para ingresar la nueva contraseña |
+| `/login` | Ahora incluye link "¿Olvidaste tu contraseña?" |
+
+### 4.8 Archivos relevantes
+
+```
+backend/app/
+  models/models.py              → PasswordResetToken (tabla)
+  schemas/schemas.py            → PasswordResetRequest, PasswordResetConfirm
+  services/password_reset_service.py → create_token, get_valid_token, use_token
+  services/email_service.py     → send_password_reset (SMTP)
+  api/password_reset.py         → POST /auth/password-reset/request y /confirm
+  core/config.py                → SMTP_*, RESET_TOKEN_EXPIRE_MINUTES, FRONTEND_URL
+
+frontend/app/
+  forgot-password/page.tsx      → página de solicitud
+  reset-password/page.tsx       → página de confirmación (lee ?token de URL)
+frontend/lib/api/services.ts    → authService.requestPasswordReset / confirmPasswordReset
+```
+
+---
+
+## 5. Adaptar el RBAC a un nuevo dominio
 
 ### 4.1 Definir los recursos del proyecto
 
@@ -543,7 +679,7 @@ def require_producto_delete():
 
 ---
 
-## 5. Agregar un nuevo recurso protegido
+## 6. Agregar un nuevo recurso protegido
 
 Checklist completo para agregar, por ejemplo, un recurso `Producto`.
 
@@ -784,7 +920,7 @@ alembic upgrade head
 
 ---
 
-## 6. Nueva página en el frontend
+## 7. Nueva página en el frontend
 
 Checklist completo para agregar la página `/productos` al frontend.
 
@@ -989,7 +1125,7 @@ function FilaProducto({ producto }: { producto: Producto }) {
 
 ---
 
-## 7. Variables de entorno y checklist de producción
+## 8. Variables de entorno y checklist de producción
 
 ### Variables obligatorias en producción
 
@@ -1034,7 +1170,7 @@ python -c "import secrets; print(secrets.token_hex(32))"
 
 ---
 
-## 8. Limitaciones conocidas y evolución futura
+## 9. Limitaciones conocidas y evolución futura
 
 Esta sección describe las limitaciones del template actual y los caminos de evolución para proyectos que crecen en complejidad.
 
@@ -1079,7 +1215,7 @@ Auth, usuarios, roles y permisos viven en el mismo servicio. Esto es correcto pa
 
 ---
 
-## 9. Referencia rápida
+## 10. Referencia rápida
 
 ### Estructura de archivos clave
 
