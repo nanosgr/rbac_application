@@ -595,7 +595,7 @@ frontend/lib/api/services.ts    → authService.requestPasswordReset / confirmPa
 
 ## 5. Adaptar el RBAC a un nuevo dominio
 
-### 4.1 Definir los recursos del proyecto
+### 5.1 Definir los recursos del proyecto
 
 Antes de tocar código, mapear los recursos y acciones propios del dominio:
 
@@ -615,7 +615,7 @@ recursos:
   - settings: read, update
 ```
 
-### 4.2 Editar `init_db.py`
+### 5.2 Editar `init_db.py`
 
 Archivo: `backend/app/db/init_db.py`
 
@@ -637,7 +637,7 @@ permissions_data = [
 ]
 ```
 
-### 4.3 Definir roles y asignar permisos
+### 5.3 Definir roles y asignar permisos
 
 En la misma función `init_db()`, ajustar los roles y sus permisos:
 
@@ -659,7 +659,7 @@ supervisor.permissions = [p for p in permissions
     or (p.resource == "productos" and p.action == "create")]
 ```
 
-### 4.4 Agregar helpers de permisos en `deps.py`
+### 5.4 Agregar helpers de permisos en `deps.py`
 
 ```python
 # backend/app/core/deps.py
@@ -683,7 +683,7 @@ def require_producto_delete():
 
 Checklist completo para agregar, por ejemplo, un recurso `Producto`.
 
-### 5.1 Modelo ORM
+### 6.1 Modelo ORM
 
 `backend/app/models/models.py`
 
@@ -712,7 +712,7 @@ class Producto(SQLModel, table=True):
 
 > Incluir `owner_id` si el recurso tiene concept de propietario (necesario para ABAC).
 
-### 5.2 Schemas Pydantic
+### 6.2 Schemas Pydantic
 
 `backend/app/schemas/schemas.py`
 
@@ -738,7 +738,7 @@ class ProductoRead(SQLModel):
     created_at: Optional[datetime]
 ```
 
-### 5.3 Servicio CRUD
+### 6.3 Servicio CRUD
 
 `backend/app/services/crud.py`
 
@@ -778,7 +778,7 @@ class ProductoService:
 producto_service = ProductoService()
 ```
 
-### 5.4 Endpoint con permisos, ABAC y auditoría
+### 6.4 Endpoint con permisos, ABAC y auditoría
 
 `backend/app/api/productos.py`
 
@@ -884,7 +884,7 @@ def eliminar_producto(
                       before_data=before, ip=ip, request_id=rid, user_agent=ua)
 ```
 
-### 5.5 Registrar el router
+### 6.5 Registrar el router
 
 `backend/app/api/__init__.py`
 
@@ -894,7 +894,7 @@ from app.api import productos
 api_router.include_router(productos.router, prefix=settings.API_V1_STR)
 ```
 
-### 5.6 Actualizar la lista de recursos disponibles
+### 6.6 Actualizar la lista de recursos disponibles
 
 El endpoint `/permissions/resources/available` tiene los recursos hardcodeados. Al agregar un recurso nuevo, actualizarlo en `backend/app/api/permissions.py`:
 
@@ -910,7 +910,7 @@ def get_available_resources(current_user: User = Depends(require_permission_read
     }
 ```
 
-### 5.7 Migración Alembic
+### 6.7 Migración Alembic
 
 ```bash
 cd backend
@@ -924,7 +924,7 @@ alembic upgrade head
 
 Checklist completo para agregar la página `/productos` al frontend.
 
-### 6.1 Tipos TypeScript
+### 7.1 Tipos TypeScript
 
 `frontend/types/index.ts`
 
@@ -961,7 +961,7 @@ export interface GetProductosParams {
 }
 ```
 
-### 6.2 Servicio API
+### 7.2 Servicio API
 
 `frontend/lib/api/services.ts`
 
@@ -984,7 +984,7 @@ export const productoService = {
 };
 ```
 
-### 6.3 Crear la página
+### 7.3 Crear la página
 
 `frontend/app/productos/page.tsx`
 
@@ -1060,7 +1060,7 @@ export default function ProductosPage() {
 
 > **Regla importante:** `ProtectedComponent` y `hasPermission()` son UX — ocultan elementos para mejorar la experiencia. El enforcement real ocurre **siempre** en el backend. Nunca confiar en la UI para proteger datos.
 
-### 6.4 Agregar al sidebar de navegación
+### 7.4 Agregar al sidebar de navegación
 
 `frontend/components/layout/Sidebar.tsx`
 
@@ -1078,7 +1078,7 @@ const navItems: NavItem[] = [
 ];
 ```
 
-### 6.5 Proteger secciones de UI con `ProtectedComponent`
+### 7.5 Proteger secciones de UI con `ProtectedComponent`
 
 ```tsx
 // Visible con un permiso específico
@@ -1097,7 +1097,7 @@ const navItems: NavItem[] = [
 </ProtectedComponent>
 ```
 
-### 6.6 Verificar permisos directamente en código
+### 7.6 Verificar permisos directamente en código
 
 ```tsx
 import { useAuth } from '@/context/AuthContext';
@@ -1174,7 +1174,7 @@ python -c "import secrets; print(secrets.token_hex(32))"
 
 Esta sección describe las limitaciones del template actual y los caminos de evolución para proyectos que crecen en complejidad.
 
-### 8.1 ABAC limitado
+### 9.1 ABAC limitado
 
 El template implementa RBAC puro con ownership básico (`check_owner_or_permission`). **No cubre** reglas como:
 - "puede ver vuelos de su región"
@@ -1193,19 +1193,19 @@ def can_edit_pedido(user: User, pedido: Pedido) -> bool:
 
 Centralizar estas funciones en un módulo `app/core/policies.py`.
 
-### 8.2 Revocación de tokens por sesión
+### 9.2 Revocación de tokens por sesión
 
 El `token_version` invalida **todos** los tokens del usuario a la vez. No permite invalidar una sesión específica entre varias concurrentes (ej.: cerrar sesión solo en el móvil).
 
 **Evolución:** Para sesiones independientes, agregar una tabla `sessions` con un `session_id` en el claim JWT y una blacklist en Redis o en DB.
 
-### 8.3 Multi-tenancy
+### 9.3 Multi-tenancy
 
 El template no tiene soporte para múltiples tenants (clientes/organizaciones). Roles y permisos son globales.
 
 **Evolución:** Agregar `tenant_id: int` a las tablas `users`, `roles`, `permissions`, y filtrar todas las queries por `tenant_id`. Este cambio es invasivo — mejor planificarlo desde el inicio si el proyecto lo requiere.
 
-### 8.4 Acoplamiento Auth ↔ negocio
+### 9.4 Acoplamiento Auth ↔ negocio
 
 Auth, usuarios, roles y permisos viven en el mismo servicio. Esto es correcto para proyectos medianos. Si el sistema escala a múltiples servicios que necesitan autenticación:
 
