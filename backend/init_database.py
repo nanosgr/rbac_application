@@ -12,12 +12,13 @@ def main():
         
         # Importar después de agregar al path
         from app.db.database import engine
-        # from app.models.models import Base
+        from sqlmodel import SQLModel
+        # import app.models.models
         from app.db.init_db import init_db
         
         # Crear todas las tablas
         print("📋 Creando tablas...")
-        engine.metadata.create_all(bind=engine)
+        SQLModel.metadata.create_all(bind=engine)
         print("✅ Tablas creadas exitosamente")
         
         # Inicializar datos
