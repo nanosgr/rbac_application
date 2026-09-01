@@ -14,7 +14,7 @@ from app.core.deps import (
     require_user_create,
     require_user_update,
     require_user_delete,
-    check_owner_or_permission,
+    has_permission,
 )
 
 router = APIRouter()
@@ -115,7 +115,11 @@ def read_user(
     db_user = user_service.get_user(db, user_id=user_id)
     if db_user is None:
         raise HTTPException(status_code=404, detail="User not found")
-    if not check_owner_or_permission(db_user.created_by, current_user, "users:read"):
+    allowed = has_permission(
+        current_user, "users", "read", db=db,
+        context={"resource_owner_id": db_user.id},
+    )
+    if not allowed and db_user.created_by != current_user.id:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Permission denied. Required: users:read")
     return db_user
 
@@ -131,7 +135,11 @@ def update_user(
     target = user_service.get_user(db, user_id=user_id)
     if target is None:
         raise HTTPException(status_code=404, detail="User not found")
-    if not check_owner_or_permission(target.created_by, current_user, "users:update"):
+    allowed = has_permission(
+        current_user, "users", "update", db=db,
+        context={"resource_owner_id": target.id},
+    )
+    if not allowed and target.created_by != current_user.id:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Permission denied. Required: users:update")
     if user_update.username:
         existing = user_service.get_user_by_username(db, username=user_update.username)

@@ -9,7 +9,9 @@ import sys
 sys.path.append(os.path.dirname(os.path.dirname(__file__)))
 
 from sqlmodel import SQLModel
-from app.models.models import User, Role, Permission, UserRoleLink, RolePermissionLink  # noqa: F401
+from app.models.models import (  # noqa: F401
+    User, Role, Permission, UserRoleLink, RolePermissionLink, RoleParentLink,
+)
 from app.core.config import settings
 
 # this is the Alembic Config object, which provides

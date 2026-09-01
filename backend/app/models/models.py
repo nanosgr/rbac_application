@@ -26,10 +26,24 @@ class RolePermissionLink(SQLModel, table=True):
 
     role_id: Optional[int] = Field(default=None, foreign_key="roles.id", primary_key=True)
     permission_id: Optional[int] = Field(default=None, foreign_key="permissions.id", primary_key=True)
+    # "allow" (por defecto) | "deny" — una regla deny gana siempre sobre cualquier allow
+    effect: str = Field(default="allow")
+    # nombre de una assertion registrada en app.core.assertions; si está seteado la
+    # regla es un allow condicional (otorga sólo si el predicado pasa en runtime)
+    assertion: Optional[str] = Field(default=None)
     assigned_at: Optional[datetime] = Field(
         default=None,
         sa_column=Column(DateTime(timezone=True), server_default=func.now()),
     )
+
+
+class RoleParentLink(SQLModel, table=True):
+    """Jerarquía de roles (DAG multi-padre): `role_id` hereda de `parent_id`."""
+
+    __tablename__ = "role_parents"
+
+    role_id: Optional[int] = Field(default=None, foreign_key="roles.id", primary_key=True)
+    parent_id: Optional[int] = Field(default=None, foreign_key="roles.id", primary_key=True)
 
 
 # ---------------------------------------------------------------------------
@@ -101,6 +115,27 @@ class Role(RoleBase, table=True):
     )
     users: List["User"] = Relationship(back_populates="roles", link_model=UserRoleLink, sa_relationship_kwargs={"lazy": "selectin"})
     permissions: List[Permission] = Relationship(back_populates="roles", link_model=RolePermissionLink, sa_relationship_kwargs={"lazy": "selectin"})
+    parents: List["Role"] = Relationship(
+        back_populates="children",
+        link_model=RoleParentLink,
+        sa_relationship_kwargs={
+            "primaryjoin": "Role.id==RoleParentLink.role_id",
+            "secondaryjoin": "Role.id==RoleParentLink.parent_id",
+            "lazy": "selectin",
+        },
+    )
+    children: List["Role"] = Relationship(
+        back_populates="parents",
+        link_model=RoleParentLink,
+        sa_relationship_kwargs={
+            "primaryjoin": "Role.id==RoleParentLink.parent_id",
+            "secondaryjoin": "Role.id==RoleParentLink.role_id",
+        },
+    )
+
+    @property
+    def parent_ids(self) -> List[int]:
+        return [p.id for p in self.parents if p.id is not None]
 
 
 class RoleCreate(RoleBase):
@@ -112,6 +147,7 @@ class RoleRead(RoleBase):
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
     permissions: List[PermissionRead] = []
+    parent_ids: List[int] = []
 
 
 class RoleUpdate(SQLModel):

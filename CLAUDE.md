@@ -80,7 +80,7 @@ psql -U rbac_user -d rbac_app -f 01_create_database.sql
 The backend follows a layered architecture:
 
 - **app/api/** - API endpoints organized by resource (auth, users, roles, permissions)
-- **app/core/** - Core functionality (config, security, dependencies)
+- **app/core/** - Core functionality (config, security, dependencies, `rbac.py` decision engine, `assertions.py` ABAC predicates)
 - **app/models/** - SQLAlchemy ORM models
 - **app/schemas/** - Pydantic schemas for validation
 - **app/services/** - Business logic and CRUD operations
@@ -88,26 +88,58 @@ The backend follows a layered architecture:
 
 ### RBAC Permission System
 
-**Permission Format:** `resource:action` (e.g., `users:read`, `roles:create`)
+**Permission Format:** `resource:action` (e.g., `users:read`, `roles:create`). Wildcards
+allowed: `users:*`, `*:read`, `*:*` (matched by `rbac.pattern_matches`).
+
+**Decision engine:** `app/core/rbac.py` (pure, no FastAPI) builds an `EffectivePolicy`
+(`allow` / `deny` / `conditional` pattern sets) per user and evaluates it:
+
+- **Role hierarchy:** roles inherit from parent roles (table `role_parents`, DAG,
+  cycle-guarded). `rbac.resolve_role_family` walks ancestors; a user's policy is the
+  union over every assigned role's family.
+- **DENY rules:** `role_permissions.effect` is `"allow"` (default) or `"deny"`. A matching
+  `deny` always wins.
+- **Assertions:** `role_permissions.assertion` names a predicate registered in
+  `app/core/assertions.py` (built-in: `owner`). Evaluated at request time with a
+  `context` dict supplied by the endpoint.
+- **Ternary result:** `rbac.evaluate(...) -> True | False | None`.
+- **Cache:** `_policy_cache` (TTL 60s, key `(username, token_version)`); mutations call
+  `rbac.invalidate_policy_cache()`.
 
 **Permission Checking:**
-1. Superusers bypass all permission checks
-2. Regular users inherit permissions from their assigned roles
-3. Use the `require_permissions()` dependency in endpoints to enforce permissions
+1. Superusers get the `{"*:*"}` policy (not a special code path).
+2. Regular users inherit permissions from their roles and all ancestor roles.
+3. `require_permissions(["users:read"])` — static dependency, no context (assertion-only
+   rules do NOT grant here).
+4. `has_permission(user, resource, action, *, db, context=...)` — full evaluation
+   including assertions; call inside the endpoint body.
 
 **Example endpoint with permissions:**
 ```python
-from app.core.deps import require_permissions
+from app.core.deps import require_permissions, has_permission
 
 @router.get("/users")
-def list_users(
-    current_user: User = Depends(require_permissions(["users:read"]))
-):
-    # Only users with "users:read" permission can access
-    pass
+def list_users(current_user: User = Depends(require_permissions(["users:read"]))):
+    ...
+
+@router.get("/pedidos/{pid}")
+def get_pedido(pid: int, db: Session = Depends(get_db),
+               current_user: User = Depends(get_current_active_user)):
+    pedido = ...
+    if not has_permission(current_user, "pedidos", "read", db=db,
+                          context={"resource_owner_id": pedido.owner_id}):
+        raise HTTPException(403)
 ```
 
+**Role hierarchy API:** `POST /api/v1/roles/{id}/parents` (assign parents, 400 on cycle),
+`GET /api/v1/roles/{id}/effective-permissions` (resolved allow/deny/conditional).
+`POST /api/v1/roles/{id}/permissions` accepts either `permission_ids` or richer `rules`
+(`{permission_id, effect, assertion}`).
+
 **Convenience functions:** Use `require_user_read()`, `require_role_create()`, etc. from `app/core/deps.py` for common permission checks.
+
+**Engine tests:** `cd backend && pytest` (see `tests/test_rbac_engine.py`,
+`tests/test_roles_api.py`; SQLite in-memory, no live DB needed).
 
 ### Database Schema
 
@@ -118,7 +150,8 @@ The system uses two levels of database abstraction:
 
 **Key relationships:**
 - Users ↔ Roles (many-to-many via user_roles)
-- Roles ↔ Permissions (many-to-many via role_permissions)
+- Roles ↔ Permissions (many-to-many via role_permissions; carries `effect` + `assertion`)
+- Roles ↔ Roles (many-to-many via role_parents; role hierarchy DAG)
 
 ### Authentication Flow
 

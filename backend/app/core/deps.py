@@ -2,29 +2,16 @@ from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from sqlmodel import Session
 from typing import List, Optional
-from cachetools import TTLCache
 from app.db.database import get_db
 from app.core.security import verify_token
+from app.core import rbac
 from app.services.crud import user_service
 from app.models.models import User
 
 security = HTTPBearer()
 
-# Cache de permisos: key=(username, token_version), TTL=60s
-_permissions_cache: TTLCache = TTLCache(maxsize=512, ttl=60)
-
-
-def get_user_permissions(user: User) -> set:
-    """Retorna el conjunto de permisos efectivos del usuario. Superusers obtienen wildcard."""
-    if user.is_superuser:
-        return {"*:*"}
-    return {
-        f"{permission.resource}:{permission.action}"
-        for role in user.roles
-        if role.is_active
-        for permission in role.permissions
-        if permission.is_active
-    }
+# Re-export para compatibilidad / uso desde servicios y endpoints
+invalidate_policy_cache = rbac.invalidate_policy_cache
 
 
 def get_current_user(
@@ -40,8 +27,9 @@ def get_current_user(
     if payload is None:
         raise credentials_exception
 
+    # La clave de cache incluye token_version: si el token fue revocado, hay miss.
     cache_key = (payload["sub"], payload["token_version"])
-    cached = _permissions_cache.get(cache_key)
+    cached = rbac._policy_cache.get(cache_key)
 
     if cached is not None:
         user_id, _ = cached
@@ -57,9 +45,7 @@ def get_current_user(
     if user.token_version != payload["token_version"]:
         raise credentials_exception
 
-    permissions = get_user_permissions(user)
-    _permissions_cache[cache_key] = (user.id, permissions)
-
+    rbac.get_cached_policy(db, user)
     return user
 
 
@@ -69,14 +55,26 @@ def get_current_active_user(current_user: User = Depends(get_current_user)) -> U
     return current_user
 
 
-def require_permissions(required_permissions: List[str]):
-    def permission_checker(current_user: User = Depends(get_current_active_user)):
-        cache_key = (current_user.username, current_user.token_version)
-        cached = _permissions_cache.get(cache_key)
-        user_permissions = cached[1] if cached else get_user_permissions(current_user)
+def _split(permission: str) -> tuple:
+    resource, _, action = permission.partition(":")
+    return resource, action
 
+
+def require_permissions(required_permissions: List[str]):
+    """Dependencia estática: exige (AND) cada permiso `resource:action`.
+
+    Evalúa sin contexto, por lo que las reglas condicionadas por assertion NO
+    otorgan acceso acá; para eso usar `has_permission()` dentro del endpoint.
+    """
+
+    def permission_checker(
+        current_user: User = Depends(get_current_active_user),
+        db: Session = Depends(get_db),
+    ):
+        policy = rbac.get_cached_policy(db, current_user)
         for required in required_permissions:
-            if "*:*" not in user_permissions and required not in user_permissions:
+            resource, action = _split(required)
+            if rbac.evaluate(policy, resource, action) is not True:
                 raise HTTPException(
                     status_code=status.HTTP_403_FORBIDDEN,
                     detail=f"Permission denied. Required: {required}",
@@ -86,29 +84,41 @@ def require_permissions(required_permissions: List[str]):
     return permission_checker
 
 
-def check_owner_or_permission(resource_owner_id: Optional[int], current_user: User, permission: str) -> bool:
-    """Retorna True si el usuario es el dueño del recurso O tiene el permiso especificado."""
-    cache_key = (current_user.username, current_user.token_version)
-    cached = _permissions_cache.get(cache_key)
-    user_permissions = cached[1] if cached else get_user_permissions(current_user)
-    if "*:*" in user_permissions or permission in user_permissions:
+def has_permission(
+    current_user: User,
+    resource: str,
+    action: str,
+    *,
+    db: Session,
+    context: Optional[dict] = None,
+) -> bool:
+    """Evaluación completa (incluye wildcards, DENY y assertions con contexto)."""
+    policy = rbac.get_cached_policy(db, current_user)
+    return rbac.evaluate(policy, resource, action, user=current_user, context=context) is True
+
+
+def check_owner_or_permission(
+    resource_owner_id: Optional[int],
+    current_user: User,
+    permission: str,
+    *,
+    db: Optional[Session] = None,
+) -> bool:
+    """DEPRECADO: usar `has_permission(..., context={"resource_owner_id": ...})`.
+
+    True si el usuario tiene el permiso (con la assertion `owner` resuelta contra
+    `resource_owner_id`) o si es el dueño del recurso.
+    """
+    resource, action = _split(permission)
+    context = {"resource_owner_id": resource_owner_id}
+    if db is not None:
+        policy = rbac.get_cached_policy(db, current_user)
+    else:
+        cached = rbac._policy_cache.get(rbac.cache_key(current_user))
+        policy = cached[1] if cached else rbac.EffectivePolicy()
+    if rbac.evaluate(policy, resource, action, user=current_user, context=context) is True:
         return True
     return resource_owner_id is not None and current_user.id == resource_owner_id
-
-
-def require_owner_or_permission(permission: str):
-    """
-    Dependencia ABAC: inyecta current_user validado para endpoints donde el acceso
-    se permite si el usuario es dueño del recurso O tiene el permiso indicado.
-
-    Uso en el endpoint:
-        current_user = Depends(require_owner_or_permission("items:read"))
-        if not check_owner_or_permission(item.owner_id, current_user, "items:read"):
-            raise HTTPException(403)
-    """
-    def dependency(current_user: User = Depends(get_current_active_user)) -> User:
-        return current_user
-    return dependency
 
 
 def require_user_read():

@@ -7,7 +7,13 @@ from app.db.database import get_db
 from app.services.crud import role_service
 from app.services.audit_service import audit_service
 from app.models.models import User, Role, RoleRead, RoleCreate, RoleUpdate
-from app.schemas.schemas import RolePermissionAssignment, PaginatedResponse
+from app.schemas.schemas import (
+    RolePermissionAssignment,
+    RolePermissionRule,
+    RoleParentAssignment,
+    EffectivePermissionsRead,
+    PaginatedResponse,
+)
 from app.core.deps import (
     require_role_read,
     require_role_create,
@@ -129,11 +135,54 @@ def assign_permissions_to_role(
     if target is None:
         raise HTTPException(status_code=404, detail="Role not found")
     before = json.dumps({"permission_ids": [p.id for p in target.permissions]})
-    updated_role = role_service.assign_permissions_to_role(db, role_id, permission_assignment.permission_ids)
+    rules = permission_assignment.rules or [
+        RolePermissionRule(permission_id=pid) for pid in permission_assignment.permission_ids
+    ]
+    updated_role = role_service.assign_permissions_to_role(db, role_id, rules)
     rid, ua, ip = _get_request_meta(request)
     audit_service.log(db, action="assign_permissions", resource="role", resource_id=role_id,
                       user_id=current_user.id, username=current_user.username,
                       before_data=before,
-                      after_data=json.dumps({"permission_ids": permission_assignment.permission_ids}),
+                      after_data=json.dumps({"rules": [r.model_dump() for r in rules]}),
+                      ip=ip, request_id=rid, user_agent=ua)
+    return updated_role
+
+
+@router.get("/{role_id}/effective-permissions", response_model=EffectivePermissionsRead)
+def read_effective_permissions(
+    role_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_role_read()),
+):
+    """Permisos efectivos del rol, resueltos sobre su jerarquía (allow / deny / condicionales)."""
+    result = role_service.get_effective_permissions(db, role_id)
+    if result is None:
+        raise HTTPException(status_code=404, detail="Role not found")
+    return result
+
+
+@router.post("/{role_id}/parents", response_model=RoleRead)
+def assign_parents_to_role(
+    request: Request,
+    role_id: int,
+    parent_assignment: RoleParentAssignment,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_role_update()),
+):
+    if parent_assignment.role_id != role_id:
+        raise HTTPException(status_code=400, detail="Role ID in path and body must match")
+    target = role_service.get_role(db, role_id)
+    if target is None:
+        raise HTTPException(status_code=404, detail="Role not found")
+    before = json.dumps({"parent_ids": target.parent_ids})
+    try:
+        updated_role = role_service.assign_parents_to_role(db, role_id, parent_assignment.parent_ids)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    rid, ua, ip = _get_request_meta(request)
+    audit_service.log(db, action="assign_parents", resource="role", resource_id=role_id,
+                      user_id=current_user.id, username=current_user.username,
+                      before_data=before,
+                      after_data=json.dumps({"parent_ids": parent_assignment.parent_ids}),
                       ip=ip, request_id=rid, user_agent=ua)
     return updated_role

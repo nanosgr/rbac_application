@@ -30,7 +30,10 @@ Referencia personal para arrancar nuevos proyectos basados en este template. Cub
 | Estilos | Tailwind CSS v4 | UI con soporte dark/light mode |
 | Infraestructura | Docker Compose | Levanta PostgreSQL en local |
 
-**Sistema de permisos RBAC:** `recurso:acción` — granular, heredado por roles. Los superusuarios reciben el wildcard `*:*` tratado como un permiso más, no como bypass especial.
+**Sistema de permisos RBAC:** `recurso:acción` — granular, con **jerarquía de roles**
+(un rol hereda de sus padres), **wildcards** (`users:*`, `*:read`, `*:*`), **reglas DENY**
+con precedencia y **resultado ternario** (allow / deny / sin regla). Los superusuarios
+reciben el wildcard `*:*` tratado como una regla más, no como bypass especial.
 
 **Flujo de autenticación:** JWT stateless con access token (30 min) + refresh token (7 días). El frontend renueva el access token automáticamente ante un 401.
 
@@ -42,7 +45,9 @@ Referencia personal para arrancar nuevos proyectos basados en este template. Cub
 
 **Auditoría:** Toda operación CRUD queda registrada con usuario, acción, recurso, IP, user-agent, request_id, datos antes/después y resultado (success/failure).
 
-**ABAC básico:** `check_owner_or_permission()` permite combinar verificación de permisos con ownership del recurso.
+**ABAC vía assertions:** una regla de permiso puede condicionarse a un predicado con
+nombre (`owner`, `same_region`, …) evaluado en runtime con el contexto del endpoint
+(`has_permission(..., context=...)`).
 
 ---
 
@@ -171,11 +176,11 @@ POST /api/v1/auth/login (form-urlencoded: username + password)
                          verifica token_version del JWT == token_version en DB
                          (si difieren → 401: token revocado)
   get_current_active_user() → verifica is_active=True
-  require_permissions() → obtiene permisos del cache (TTL 60 s) o los calcula
-                          superuser → permisos = {"*:*"}
-                          regular   → union de permisos de roles activos
-                          "*:*" en permisos → acceso total (wildcard)
-                          "recurso:acción" requerido no presente → 403
+  require_permissions() → EffectivePolicy del cache (TTL 60 s) o build_policy()
+                          superuser → allow {"*:*"}
+                          regular   → reglas de la familia de roles (directos + ancestros)
+                          evaluate(): deny match → 403 · allow match (incl. wildcard) → OK
+                                      sin regla / sólo allow condicional sin contexto → 403
 
 [Token expirado (401)]
   │
@@ -203,42 +208,112 @@ POST /api/v1/auth/logout (requiere Bearer)
 
 ### 3.2 Cómo funciona `require_permissions()` — implementación real
 
-Archivo: `backend/app/core/deps.py`
+Archivos: `backend/app/core/rbac.py` (motor de decisión, sin FastAPI) y
+`backend/app/core/deps.py` (dependencias FastAPI).
+
+El motor separa la **política efectiva** del usuario (todas sus reglas, ya resueltas
+sobre la jerarquía de roles) de la **evaluación** de un permiso concreto:
 
 ```python
-# Cache en memoria: key=(username, token_version), TTL=60s, máx 512 entradas
-_permissions_cache: TTLCache = TTLCache(maxsize=512, ttl=60)
+# backend/app/core/rbac.py
 
+@dataclass
+class EffectivePolicy:
+    allow: set[str]                       # patrones "resource:action" (con * opcional)
+    deny: set[str]                        # una regla deny gana SIEMPRE
+    conditional: list[tuple[str, str]]    # (patrón, nombre de assertion) → allow condicional
 
-def get_user_permissions(user: User) -> set:
-    """Superusers obtienen wildcard; el resto hereda permisos de sus roles activos."""
-    if user.is_superuser:
-        return {"*:*"}
-    return {
-        f"{permission.resource}:{permission.action}"
-        for role in user.roles
-        if role.is_active
-        for permission in role.permissions
-        if permission.is_active
-    }
+def build_policy(db, user) -> EffectivePolicy:
+    """Superuser → allow {"*:*"}. Resto: recorre la familia de roles del usuario
+    (directos + heredados) y junta las filas role_permissions activas."""
 
+def evaluate(policy, resource, action, *, user=None, context=None) -> bool | None:
+    # 1) si matchea algún patrón de deny  → False   (inmediato)
+    # 2) si matchea algún patrón de allow → True
+    # 3) si matchea un allow condicional y su assertion pasa → True
+    # 4) si nada matchea → None   (resultado ternario)
+```
+
+```python
+# backend/app/core/deps.py
 
 def require_permissions(required_permissions: List[str]):
-    def permission_checker(current_user: User = Depends(get_current_active_user)):
-        cache_key = (current_user.username, current_user.token_version)
-        cached = _permissions_cache.get(cache_key)
-        user_permissions = cached[1] if cached else get_user_permissions(current_user)
-
+    def permission_checker(
+        current_user: User = Depends(get_current_active_user),
+        db: Session = Depends(get_db),
+    ):
+        policy = rbac.get_cached_policy(db, current_user)   # cache TTL 60s
         for required in required_permissions:
-            if "*:*" not in user_permissions and required not in user_permissions:
-                raise HTTPException(
-                    status_code=403,
-                    detail=f"Permission denied. Required: {required}",
-                )
+            resource, _, action = required.partition(":")
+            if rbac.evaluate(policy, resource, action) is not True:
+                raise HTTPException(403, detail=f"Permission denied. Required: {required}")
         return current_user
-
     return permission_checker
 ```
+
+`require_permissions()` evalúa **sin contexto**: las reglas con `assertion` no otorgan
+acceso por esta vía. Para permisos condicionados por atributos del recurso, usar
+`has_permission()` dentro del endpoint (ver 3.8).
+
+**Flujo completo de un request protegido:**
+
+```mermaid
+flowchart TD
+    A["Request + Authorization: Bearer"] --> B["get_current_user()"]
+    B --> C{"¿policy en _policy_cache?<br/>key = (username, token_version)"}
+    C -- "hit" --> D["recarga user por id"]
+    C -- "miss" --> E["rbac.build_policy(db, user)"]
+    E --> F["cachea (user.id, EffectivePolicy)<br/>TTL 60s"]
+    D --> G
+    F --> G["get_current_active_user()<br/>¿is_active?"]
+    G --> H{"tipo de verificación"}
+    H -- "require_permissions(['res:act'])<br/>(dependencia, SIN contexto)" --> I["rbac.evaluate(policy, res, act)"]
+    H -- "has_permission(res, act, context=...)<br/>(en el cuerpo del endpoint)" --> J["rbac.evaluate(policy, res, act, user, context)"]
+    I --> K{"¿resultado is True?"}
+    J --> K
+    K -- "sí" --> L["200 — se ejecuta el endpoint"]
+    K -- "no (False o None)" --> M["403 Permission denied"]
+    N["mutación de roles / permisos / jerarquía"] -.->|"invalidate_policy_cache()"| C
+```
+
+**`build_policy()` — cómo se arma la política efectiva:**
+
+```mermaid
+flowchart TD
+    A["build_policy(db, user)"] --> B{"¿user.is_superuser?"}
+    B -- "sí" --> Z["EffectivePolicy(allow = {'*:*'})"]
+    B -- "no" --> C["por cada rol asignado al usuario"]
+    C --> D["resolve_role_family(rol)<br/>DFS sobre rol.parents<br/>set de visitados → cycle-safe"]
+    D --> E["role_ids = unión de familias<br/>(solo is_active)"]
+    E --> F["SELECT role_permissions JOIN permissions activos<br/>WHERE role_id IN role_ids"]
+    F --> G{"por cada fila (link, permission)"}
+    G -- "assertion != null" --> H["conditional += (pattern, assertion)"]
+    G -- "effect = 'deny'" --> I["deny += pattern"]
+    G -- "resto" --> J["allow += pattern"]
+    H --> K["EffectivePolicy(allow, deny, conditional)"]
+    I --> K
+    J --> K
+    Z --> K
+```
+
+**`evaluate()` — decisión ternaria (DENY primero, gana siempre):**
+
+```mermaid
+flowchart TD
+    A["evaluate(policy, resource, action, user, context)"] --> B{"¿algún patrón de policy.deny matchea?<br/>(pattern_matches, con '*')"}
+    B -- "sí" --> R1["return False — DENEGADO"]
+    B -- "no" --> C{"¿algún patrón de policy.allow matchea?"}
+    C -- "sí" --> R2["return True — PERMITIDO"]
+    C -- "no" --> D{"¿algún allow condicional matchea?"}
+    D -- "no" --> R3["return None — SIN REGLA (los callers → 403)"]
+    D -- "sí" --> E["run_assertion(nombre, user, context)"]
+    E --> F{"¿predicado True?"}
+    F -- "sí" --> R2
+    F -- "no" --> R3
+```
+
+`pattern_matches(pattern, resource, action)` → `pr in (resource, "*") and pa in (action, "*")`,
+lo que habilita los comodines `users:*`, `*:read` y `*:*`.
 
 **Uso en un endpoint:**
 ```python
@@ -291,18 +366,20 @@ El campo `token_version: int` en el modelo `User` actúa como versión de sesió
 
 **Trade-off:** Este enfoque invalida todos los tokens del usuario a la vez (no permite sesiones concurrentes independientes). Para tokens con granularidad por sesión se necesitaría un almacén externo (Redis).
 
-### 3.5 Cache de permisos en memoria
+### 3.5 Cache de políticas en memoria
 
 ```python
-# backend/app/core/deps.py
-_permissions_cache: TTLCache = TTLCache(maxsize=512, ttl=60)
+# backend/app/core/rbac.py
+_policy_cache: TTLCache = TTLCache(maxsize=512, ttl=60)   # value = (user_id, EffectivePolicy)
 ```
 
 - **Clave:** `(username, token_version)` — se invalida automáticamente cuando el token_version cambia.
-- **TTL:** 60 segundos. Un cambio de permisos en DB tarda hasta 60 s en reflejarse para sesiones activas.
+- **TTL:** 60 segundos. Un cambio de roles/permisos/jerarquía tarda hasta 60 s en reflejarse para sesiones activas.
 - **Tamaño máximo:** 512 entradas (ajustar según cantidad de usuarios concurrentes esperados).
-
-Si necesitas propagación inmediata de cambios de permisos sin cerrar sesión, reducir el TTL o limpiar la entrada manualmente tras modificar roles.
+- **Invalidación explícita:** `rbac.invalidate_policy_cache()` limpia el cache del proceso.
+  Lo llaman los servicios que mutan el grafo (`assign_permissions_to_role`,
+  `assign_parents_to_role`, `update_role` con `is_active`, `delete_permission`).
+  En despliegues multi-worker cada proceso tiene su cache; el TTL de 60 s es el backstop.
 
 ### 3.6 Manejo de refresh concurrente — Frontend
 
@@ -322,60 +399,135 @@ Una vez obtenido el nuevo token, todos los requests reintentados lo usan.
 ### 3.7 Modelo de permisos RBAC
 
 ```
-Usuario → (N roles activos) → (N permisos activos)
+Usuario → (N roles activos + roles ancestros) → (N reglas de permiso)
 
-Permiso = { resource: "productos", action: "read" }
-          → name = "productos:read"
+Regla de permiso = permiso { resource, action }  +  effect (allow|deny)  +  assertion?
+```
+
+**Modelo de datos** (columnas/tablas nuevas marcadas):
+
+```mermaid
+erDiagram
+    users ||--o{ user_roles : ""
+    roles ||--o{ user_roles : ""
+    roles ||--o{ role_permissions : ""
+    permissions ||--o{ role_permissions : ""
+    roles ||--o{ role_parents : "role_id (hijo)"
+    roles ||--o{ role_parents : "parent_id (padre)"
+
+    users {
+        int id PK
+        string username
+        bool is_superuser "policy = *:*"
+        int token_version "cache key"
+    }
+    roles {
+        int id PK
+        string name
+        bool is_active
+    }
+    permissions {
+        int id PK
+        string resource "admite '*'"
+        string action "admite '*'"
+        bool is_active
+    }
+    role_permissions {
+        int role_id PK
+        int permission_id PK
+        string effect "NUEVO - allow o deny"
+        string assertion "NUEVO - predicado, nullable"
+    }
+    role_parents {
+        int role_id PK "TABLA NUEVA - DAG"
+        int parent_id PK
+    }
 ```
 
 **Acciones estándar:** `create`, `read`, `update`, `delete`, `export`
 
-Los permisos se heredan de **todos** los roles activos del usuario. Si un permiso está en cualquier rol activo, el usuario lo tiene. No hay jerarquía entre roles.
+Los permisos se heredan de **todos** los roles activos del usuario y de los
+**roles ancestros** de cada uno (ver 3.11). Si un permiso está en cualquier rol de esa
+familia, el usuario lo tiene — salvo que una regla `deny` lo bloquee.
 
-**Superusuario:** en lugar de un bypass especial (`if is_superuser: return True`), se le asigna el wildcard `{"*:*"}` como conjunto de permisos. `require_permissions()` lo trata igual que cualquier otro permiso, evitando lógica especial dispersa en el código.
+**Wildcards de recurso:** un permiso puede usar `*` como comodín en el recurso o la
+acción. Los patrones se comparan con `pattern_matches()`:
+
+| Patrón del permiso | Concede |
+|---|---|
+| `users:read` | exactamente `users:read` |
+| `users:*` | cualquier acción sobre `users` |
+| `*:read` | `read` sobre cualquier recurso |
+| `*:*` | todo (es el que recibe el superusuario) |
+
+**Reglas DENY:** cada fila `role_permissions` tiene un campo `effect` (`"allow"` por
+defecto | `"deny"`). Una regla `deny` que matchee gana **siempre**, aunque otro rol
+(o un wildcard) conceda el permiso. Sirve para "este rol puede todo en `reports` salvo
+`delete`".
+
+**Resultado ternario:** `evaluate()` devuelve `True` (permitido), `False` (denegado
+explícitamente) o `None` (ninguna regla aplica). `require_permissions()` trata `None`
+como denegación.
+
+**Superusuario:** en lugar de un bypass especial (`if is_superuser: return True`), se le
+asigna el wildcard `{"*:*"}` como política. `evaluate()` lo trata como cualquier otra
+regla, evitando lógica especial dispersa en el código.
 
 ### 3.8 ABAC — Control basado en atributos del recurso
 
-El RBAC puro (`recurso:acción`) no distingue ownership: "puede leer sus propios pedidos vs los de otros". Para esos casos, usar `check_owner_or_permission()`:
+El RBAC puro (`recurso:acción`) no distingue atributos del recurso: "puede leer sus
+propios pedidos vs los de otros", "sólo los de su región", "sólo si está en borrador".
+Para esos casos, una regla de permiso puede referenciar una **assertion**: un predicado
+con nombre `fn(user, context) -> bool` que se evalúa en runtime.
+
+**1. Registrar la assertion** (`backend/app/core/assertions.py`):
 
 ```python
-# backend/app/core/deps.py
+from app.core.assertions import register_assertion
 
-def check_owner_or_permission(resource_owner_id: Optional[int], current_user: User, permission: str) -> bool:
-    """True si el usuario es dueño del recurso (owner_id == user.id) O tiene el permiso requerido."""
-    cache_key = (current_user.username, current_user.token_version)
-    cached = _permissions_cache.get(cache_key)
-    user_permissions = cached[1] if cached else get_user_permissions(current_user)
-    if "*:*" in user_permissions or permission in user_permissions:
-        return True
-    return resource_owner_id is not None and current_user.id == resource_owner_id
+@register_assertion("owner")            # ya viene incluida
+def _owner(user, context):
+    owner_id = context.get("resource_owner_id")
+    return owner_id is not None and owner_id == user.id
+
+@register_assertion("same_region")      # ejemplo de dominio
+def _same_region(user, context):
+    return user.region and user.region == context.get("region")
 ```
 
-**Patrón de uso en un endpoint:**
+**2. Vincular la assertion a un permiso de un rol** — al asignar permisos al rol se pasa
+`assertion` en la regla (endpoint `POST /roles/{id}/permissions` con `rules`):
+
+```json
+{ "role_id": 4, "rules": [ { "permission_id": 12, "assertion": "owner" } ] }
+```
+
+**3. Evaluar en el endpoint** con `has_permission()`, pasando el `context`:
 
 ```python
+from app.core.deps import has_permission
+
 @router.get("/{pedido_id}", response_model=PedidoRead)
-def get_pedido(
-    pedido_id: int,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_active_user),
-):
+def get_pedido(pedido_id: int, db: Session = Depends(get_db),
+               current_user: User = Depends(get_current_active_user)):
     pedido = pedido_service.get(db, pedido_id)
     if pedido is None:
         raise HTTPException(404)
-    # Acceso si: tiene permiso "pedidos:read" O es el dueño del pedido
-    if not check_owner_or_permission(pedido.owner_id, current_user, "pedidos:read"):
+    allowed = has_permission(
+        current_user, "pedidos", "read", db=db,
+        context={"resource_owner_id": pedido.owner_id, "region": pedido.region},
+    )
+    if not allowed:
         raise HTTPException(403, "Permission denied")
     return pedido
 ```
 
-Para esto, el modelo del recurso debe tener un campo `owner_id: Optional[int]` con FK a `users.id`.
+`has_permission()` corre la evaluación completa (wildcards + deny + assertions). Un rol
+con `pedidos:read` incondicional pasa siempre; uno con `pedidos:read` + assertion `owner`
+pasa sólo para sus propios pedidos.
 
-**`require_owner_or_permission(permission)`** es un helper de dependencia que valida la sesión y entrega el `current_user`; la verificación de ownership se hace en el endpoint tras obtener el recurso:
-
-```python
-current_user: User = Depends(require_owner_or_permission("pedidos:read"))
-```
+> `check_owner_or_permission()` queda como shim deprecado sobre `has_permission()`.
+> `require_owner_or_permission()` fue eliminado (no tenía uso).
 
 ### 3.9 Rate limiting
 
@@ -455,6 +607,43 @@ audit_service.log_failure(
 ```
 
 Los logs son consultables vía `GET /api/v1/audit/logs` (requiere permiso `audit:read`).
+
+### 3.11 Jerarquía de roles
+
+Un rol puede heredar de **varios** roles padre (DAG multi-padre). Tabla `role_parents`
+(`role_id`, `parent_id`). La política efectiva de un usuario resuelve, para cada rol
+asignado, toda su familia de ancestros (`rbac.resolve_role_family`, cycle-safe).
+
+**Jerarquía y reglas del seed por defecto:**
+
+```mermaid
+flowchart TD
+    Admin["Admin<br/>(todo salvo permissions:delete)"] -->|hereda de| Manager
+    Manager["Manager<br/>(read/update varios, users:create)"] -->|hereda de| User
+    User["User<br/>dashboard:read, reports:read<br/>+ users:read @assertion 'owner'"]
+    Viewer["Viewer (sin padres)<br/>allow *:read  menos  deny audit:read"]
+    Admin -.->|efectivo| EF["perms(Admin) ∪ perms(Manager) ∪ perms(User)"]
+```
+
+**Gestión vía API:**
+
+```
+POST /api/v1/roles/{role_id}/parents          # body: { role_id, parent_ids: [int] }
+GET  /api/v1/roles/{role_id}/effective-permissions   # allow / deny / conditional resueltos
+```
+
+**Reglas:**
+
+- No se permite auto-referencia ni ciclos: `assign_parents_to_role` valida contra los
+  ancestros del padre propuesto y devuelve **400** si detecta un ciclo.
+- Un `deny` heredado de un ancestro también bloquea al rol hijo.
+- Borrar un rol elimina en cascada sus filas de `role_parents`.
+
+**Cache e invalidación:** la política efectiva se cachea por `(username, token_version)`
+con TTL 60 s. Los servicios que mutan el grafo (asignar permisos/padres, activar o
+desactivar un rol, borrar permisos) llaman `rbac.invalidate_policy_cache()`, que limpia
+el cache del proceso. En despliegues **multi-worker** cada proceso tiene su propio cache;
+el TTL de 60 s es el límite superior de propagación entre workers.
 
 ---
 
@@ -659,6 +848,27 @@ supervisor.permissions = [p for p in permissions
     or (p.resource == "productos" and p.action == "create")]
 ```
 
+**Jerarquía, wildcards, DENY y assertions en el seed:**
+
+```python
+# Herencia: Supervisor hereda todo lo de Operador
+supervisor.parents = [operador]
+
+# Wildcard: un permiso "*:read" concede lectura de cualquier recurso
+consultor.permissions = [by_name["*:read"]]
+
+# DENY: Consultor NO puede leer auditoría pese al wildcard
+_ensure_link(db, consultor.id, by_name["audit:read"].id, effect="deny")
+
+# Assertion: Operador sólo edita los productos que creó
+_ensure_link(db, operador.id, by_name["productos:update"].id, assertion="owner")
+```
+
+`_ensure_link(db, role_id, permission_id, *, effect="allow", assertion=None)` es un
+helper idempotente de `init_db.py` para crear filas `role_permissions` con
+`effect`/`assertion` (las asignaciones por lista `role.permissions = [...]` siempre son
+`allow` sin assertion).
+
 ### 5.4 Agregar helpers de permisos en `deps.py`
 
 ```python
@@ -787,7 +997,7 @@ import json
 from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlmodel import Session
 from app.db.database import get_db
-from app.core.deps import require_permissions, get_current_active_user, check_owner_or_permission
+from app.core.deps import require_permissions, get_current_active_user, has_permission
 from app.models.models import User
 from app.services.crud import producto_service
 from app.services.audit_service import audit_service
@@ -821,8 +1031,9 @@ def get_producto(
     producto = producto_service.get(db, producto_id)
     if not producto:
         raise HTTPException(404, "Producto no encontrado")
-    # ABAC: dueño del recurso O tiene permiso explícito
-    if not check_owner_or_permission(producto.owner_id, current_user, "productos:read"):
+    # ABAC: permiso "productos:read" (incondicional o assertion "owner" con este contexto)
+    if not has_permission(current_user, "productos", "read", db=db,
+                          context={"resource_owner_id": producto.owner_id}):
         raise HTTPException(403, "Permission denied")
     return producto
 
@@ -855,7 +1066,8 @@ def actualizar_producto(
     producto = producto_service.get(db, producto_id)
     if not producto:
         raise HTTPException(404, "Producto no encontrado")
-    if not check_owner_or_permission(producto.owner_id, current_user, "productos:update"):
+    if not has_permission(current_user, "productos", "update", db=db,
+                          context={"resource_owner_id": producto.owner_id}):
         raise HTTPException(403, "Permission denied")
     before = json.dumps({"nombre": producto.nombre, "precio": producto.precio})
     result = producto_service.update(db, producto_id, data)
@@ -1174,24 +1386,23 @@ python -c "import secrets; print(secrets.token_hex(32))"
 
 Esta sección describe las limitaciones del template actual y los caminos de evolución para proyectos que crecen en complejidad.
 
-### 9.1 ABAC limitado
+### 9.1 ABAC — alcance actual
 
-El template implementa RBAC puro con ownership básico (`check_owner_or_permission`). **No cubre** reglas como:
-- "puede ver vuelos de su región"
-- "puede editar si está asignado como responsable"
-- "acceso basado en atributos del recurso o del usuario"
+El template soporta reglas condicionadas por atributos vía **assertions** (ver 3.8):
+un permiso de un rol puede llevar `assertion="owner"`, `assertion="same_region"`, etc.,
+y el endpoint las evalúa con `has_permission(..., context=...)`. Las assertions se
+registran en `app/core/assertions.py`.
 
-**Evolución:** Si el dominio requiere estas reglas, agregar una capa ABAC sobre el RBAC:
+**Límites:**
+- Las assertions son código (no configurables desde la UI ni la DB, sólo se referencian
+  por nombre).
+- El `context` lo arma cada endpoint manualmente; no hay un motor de políticas que
+  cargue el recurso automáticamente.
+- No hay composición de políticas de varias fuentes (aunque `evaluate()` ya devuelve un
+  resultado ternario `True`/`False`/`None` que lo permitiría).
 
-```python
-def can_edit_pedido(user: User, pedido: Pedido) -> bool:
-    return (
-        user.has_permission("pedidos:update") and
-        (pedido.owner_id == user.id or user.region == pedido.region)
-    )
-```
-
-Centralizar estas funciones en un módulo `app/core/policies.py`.
+**Evolución:** para reglas muy dinámicas, centralizar la construcción de `context` y las
+assertions de dominio en un módulo `app/core/policies.py`.
 
 ### 9.2 Revocación de tokens por sesión
 
@@ -1225,10 +1436,12 @@ backend/
 │   ├── core/
 │   │   ├── config.py        # Settings (Pydantic), variables de entorno
 │   │   ├── security.py      # JWT, bcrypt — create/verify access y refresh tokens
-│   │   ├── deps.py          # get_current_user, require_permissions, check_owner_or_permission
+│   │   ├── rbac.py          # Motor de decisión: EffectivePolicy, jerarquía, evaluate() ternario
+│   │   ├── assertions.py    # Registro de predicados ABAC (owner, ...)
+│   │   ├── deps.py          # get_current_user, require_permissions, has_permission
 │   │   └── limiter.py       # slowapi rate limiter
 │   ├── models/
-│   │   └── models.py        # Tablas SQLModel: User, Role, Permission, AuditLog
+│   │   └── models.py        # Tablas SQLModel: User, Role, Permission (+ role_parents / effect / assertion), AuditLog
 │   ├── schemas/
 │   │   └── schemas.py       # DTOs Pydantic de entrada/salida
 │   ├── services/
@@ -1303,7 +1516,7 @@ docker compose logs -f postgres
 1. models/models.py          → Clase SQLModel con table=True (incluir owner_id si aplica ABAC)
 2. schemas/schemas.py        → DTOs Create / Read / Update
 3. services/crud.py          → Clase XService con get/get_all/create/update/delete + singleton
-4. api/X.py                  → Router con endpoints, require_permissions y check_owner_or_permission
+4. api/X.py                  → Router con endpoints, require_permissions y has_permission (ABAC)
 5. api/__init__.py           → api_router.include_router(X.router, ...)
 6. api/permissions.py        → Agregar "X" a la lista resources/available
 7. db/init_db.py             → Permisos X:create/read/update/delete y asignarlos a roles

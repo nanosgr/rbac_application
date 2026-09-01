@@ -34,9 +34,30 @@ class UserRoleAssignment(SQLModel):
     role_ids: List[int]
 
 
+class RolePermissionRule(SQLModel):
+    permission_id: int
+    effect: str = "allow"          # "allow" | "deny"
+    assertion: Optional[str] = None  # nombre de assertion registrada
+
+
 class RolePermissionAssignment(SQLModel):
     role_id: int
-    permission_ids: List[int]
+    permission_ids: List[int] = []
+    # si viene, tiene prioridad sobre permission_ids (permite effect/assertion por regla)
+    rules: Optional[List[RolePermissionRule]] = None
+
+
+class RoleParentAssignment(SQLModel):
+    role_id: int
+    parent_ids: List[int]
+
+
+class EffectivePermissionsRead(SQLModel):
+    role_id: int
+    contributing_role_ids: List[int]
+    allow: List[str]
+    deny: List[str]
+    conditional: List[dict]
 
 
 class UserProfileUpdate(SQLModel):

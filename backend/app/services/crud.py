@@ -2,8 +2,12 @@ from sqlmodel import Session, select, func, or_
 from sqlalchemy import select as sa_select
 from sqlalchemy.orm import selectinload
 from typing import List, Optional
-from app.models.models import User, Role, Permission, UserCreate, UserUpdate, RoleCreate, RoleUpdate, PermissionCreate, PermissionUpdate
+from app.models.models import (
+    User, Role, Permission, RolePermissionLink, RoleParentLink,
+    UserCreate, UserUpdate, RoleCreate, RoleUpdate, PermissionCreate, PermissionUpdate,
+)
 from app.core.security import get_password_hash, verify_password
+from app.core import rbac
 
 
 class UserService:
@@ -111,14 +115,18 @@ class UserService:
 
 class RoleService:
     def get_role(self, db: Session, role_id: int) -> Optional[Role]:
-        stmt = sa_select(Role).options(selectinload(Role.permissions)).where(Role.id == role_id)
+        stmt = (
+            sa_select(Role)
+            .options(selectinload(Role.permissions), selectinload(Role.parents))
+            .where(Role.id == role_id)
+        )
         return db.execute(stmt).scalars().first()
 
     def get_role_by_name(self, db: Session, name: str) -> Optional[Role]:
         return db.exec(select(Role).where(Role.name == name)).first()
 
     def get_roles(self, db: Session, skip: int = 0, limit: int = 100, search: Optional[str] = None, is_active: Optional[bool] = None) -> List[Role]:
-        stmt = sa_select(Role).options(selectinload(Role.permissions))
+        stmt = sa_select(Role).options(selectinload(Role.permissions), selectinload(Role.parents))
         if search:
             stmt = stmt.where(or_(
                 Role.name.ilike(f"%{search}%"),
@@ -154,23 +162,143 @@ class RoleService:
                 setattr(db_role, field, value)
             db.commit()
             db.refresh(db_role)
+            if "is_active" in update_data:
+                rbac.invalidate_policy_cache()
         return db_role
 
     def delete_role(self, db: Session, role_id: int) -> bool:
         db_role = self.get_role(db, role_id)
         if db_role:
+            # limpiar filas de jerarquía que referencian a este rol como padre o hijo
+            for link in db.exec(
+                select(RoleParentLink).where(
+                    or_(RoleParentLink.role_id == role_id, RoleParentLink.parent_id == role_id)
+                )
+            ).all():
+                db.delete(link)
             db.delete(db_role)
             db.commit()
+            rbac.invalidate_policy_cache()
             return True
         return False
 
-    def assign_permissions_to_role(self, db: Session, role_id: int, permission_ids: List[int]) -> Optional[Role]:
+    def assign_permissions_to_role(self, db: Session, role_id: int, rules) -> Optional[Role]:
+        """Reemplaza las reglas rol->permiso. `rules` es una lista de objetos con
+        `permission_id`, `effect` ("allow"/"deny") y `assertion` opcional."""
         db_role = self.get_role(db, role_id)
-        if db_role:
-            permissions = db.exec(select(Permission).where(Permission.id.in_(permission_ids))).all()
-            db_role.permissions = permissions
-            db.commit()
+        if not db_role:
+            return None
+
+        rules = list(rules or [])
+        wanted_ids = {r.permission_id for r in rules}
+        valid_ids = set(
+            db.exec(select(Permission.id).where(Permission.id.in_(wanted_ids))).all()
+        ) if wanted_ids else set()
+
+        for link in db.exec(
+            select(RolePermissionLink).where(RolePermissionLink.role_id == role_id)
+        ).all():
+            db.delete(link)
+        db.flush()
+
+        for r in rules:
+            if r.permission_id not in valid_ids:
+                continue
+            effect = (getattr(r, "effect", None) or "allow").lower()
+            db.add(RolePermissionLink(
+                role_id=role_id,
+                permission_id=r.permission_id,
+                effect=effect if effect in ("allow", "deny") else "allow",
+                assertion=getattr(r, "assertion", None) or None,
+            ))
+        db.commit()
+        rbac.invalidate_policy_cache()
         return self.get_role(db, role_id)
+
+    # ------------------------------------------------------------------
+    # Jerarquía de roles
+    # ------------------------------------------------------------------
+
+    def _ancestor_ids(self, db: Session, role_id: int) -> set:
+        """IDs de todos los ancestros de `role_id` (cycle-safe)."""
+        seen: set = set()
+        stack = [role_id]
+        while stack:
+            current = stack.pop()
+            for parent_id in db.exec(
+                select(RoleParentLink.parent_id).where(RoleParentLink.role_id == current)
+            ).all():
+                if parent_id not in seen:
+                    seen.add(parent_id)
+                    stack.append(parent_id)
+        return seen
+
+    def would_create_cycle(self, db: Session, role_id: int, parent_id: int) -> bool:
+        if role_id == parent_id:
+            return True
+        # ciclo si role_id ya es ancestro de parent_id
+        return role_id in self._ancestor_ids(db, parent_id) or role_id == parent_id
+
+    def assign_parents_to_role(self, db: Session, role_id: int, parent_ids: List[int]) -> Optional[Role]:
+        db_role = self.get_role(db, role_id)
+        if not db_role:
+            return None
+
+        parent_ids = list(dict.fromkeys(parent_ids))  # dedup preservando orden
+        existing_ids = set(
+            db.exec(select(Role.id).where(Role.id.in_(parent_ids))).all()
+        ) if parent_ids else set()
+
+        for pid in parent_ids:
+            if pid not in existing_ids:
+                raise ValueError(f"Parent role {pid} does not exist")
+            if self.would_create_cycle(db, role_id, pid):
+                raise ValueError(f"Assigning parent {pid} would create a cycle")
+
+        for link in db.exec(
+            select(RoleParentLink).where(RoleParentLink.role_id == role_id)
+        ).all():
+            db.delete(link)
+        db.flush()
+
+        for pid in parent_ids:
+            db.add(RoleParentLink(role_id=role_id, parent_id=pid))
+        db.commit()
+        rbac.invalidate_policy_cache()
+        return self.get_role(db, role_id)
+
+    def get_effective_permissions(self, db: Session, role_id: int) -> Optional[dict]:
+        """Devuelve las reglas efectivas del rol resueltas sobre su jerarquía."""
+        db_role = self.get_role(db, role_id)
+        if not db_role:
+            return None
+        family = list(rbac.resolve_role_family(db_role))
+        contributing = [r.id for r in family if r.is_active and r.id is not None]
+        allow: set = set()
+        deny: set = set()
+        conditional: list = []
+        if contributing:
+            rows = db.exec(
+                select(RolePermissionLink, Permission)
+                .join(Permission, Permission.id == RolePermissionLink.permission_id)
+                .where(RolePermissionLink.role_id.in_(contributing))
+                .where(Permission.is_active == True)  # noqa: E712
+            ).all()
+            for link, perm in rows:
+                pattern = f"{perm.resource}:{perm.action}"
+                if link.assertion:
+                    conditional.append({"pattern": pattern, "assertion": link.assertion})
+                elif link.effect == "deny":
+                    deny.add(pattern)
+                else:
+                    allow.add(pattern)
+        return {
+            "role_id": role_id,
+            "contributing_role_ids": contributing,
+            "allow": sorted(allow),
+            "deny": sorted(deny),
+            "conditional": conditional,
+        }
 
 
 class PermissionService:
@@ -225,13 +353,19 @@ class PermissionService:
                 setattr(db_permission, field, value)
             db.commit()
             db.refresh(db_permission)
+            rbac.invalidate_policy_cache()
         return db_permission
 
     def delete_permission(self, db: Session, permission_id: int) -> bool:
         db_permission = self.get_permission(db, permission_id)
         if db_permission:
+            for link in db.exec(
+                select(RolePermissionLink).where(RolePermissionLink.permission_id == permission_id)
+            ).all():
+                db.delete(link)
             db.delete(db_permission)
             db.commit()
+            rbac.invalidate_policy_cache()
             return True
         return False
 

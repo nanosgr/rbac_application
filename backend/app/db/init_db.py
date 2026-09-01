@@ -1,11 +1,21 @@
 from sqlmodel import SQLModel, Session, select
 from app.db.database import engine
-from app.models.models import User, Role, Permission
+from app.models.models import User, Role, Permission, RolePermissionLink
 from app.core.security import get_password_hash
 
 
 def create_tables():
     SQLModel.metadata.create_all(bind=engine)
+
+
+def _ensure_link(db, role_id, permission_id, *, effect="allow", assertion=None):
+    """Crea (idempotente) una regla role->permission con effect/assertion."""
+    link = db.get(RolePermissionLink, (role_id, permission_id))
+    if link is None:
+        db.add(RolePermissionLink(
+            role_id=role_id, permission_id=permission_id,
+            effect=effect, assertion=assertion,
+        ))
 
 
 def init_db():
@@ -30,6 +40,9 @@ def init_db():
                 {"name": "settings:read", "description": "View settings", "resource": "settings", "action": "read"},
                 {"name": "settings:update", "description": "Update settings", "resource": "settings", "action": "update"},
                 {"name": "audit:read", "description": "View audit logs", "resource": "audit", "action": "read"},
+                # --- wildcards (demostración del matching resource/action con `*`) ---
+                {"name": "*:*", "description": "Full access (wildcard)", "resource": "*", "action": "*"},
+                {"name": "*:read", "description": "Read any resource (wildcard)", "resource": "*", "action": "read"},
             ]
 
             permissions = []
@@ -45,6 +58,10 @@ def init_db():
             db.commit()
             for p in permissions:
                 db.refresh(p)
+
+            by_name = {p.name: p for p in permissions}
+            # permisos "concretos" (sin wildcards) para los grants enumerados
+            concrete = [p for p in permissions if p.resource != "*"]
 
             roles_data = [
                 {"name": "Super Admin", "description": "Full system access"},
@@ -68,28 +85,51 @@ def init_db():
             for r in roles:
                 db.refresh(r)
 
+            by_role = {r.name: r for r in roles}
+            super_admin = by_role.get("Super Admin")
+            admin = by_role.get("Admin")
+            manager = by_role.get("Manager")
+            user_role = by_role.get("User")
+            viewer = by_role.get("Viewer")
+
             if roles and permissions:
-                super_admin = next((r for r in roles if r.name == "Super Admin"), None)
+                # Super Admin: una sola regla wildcard `*:*`
                 if super_admin and not super_admin.permissions:
-                    super_admin.permissions = permissions
+                    super_admin.permissions = [by_name["*:*"]]
 
-                admin = next((r for r in roles if r.name == "Admin"), None)
+                # Admin: todo lo concreto salvo permissions:delete
                 if admin and not admin.permissions:
-                    admin.permissions = [p for p in permissions if not (p.resource == "permissions" and p.action == "delete")]
+                    admin.permissions = [p for p in concrete if not (p.resource == "permissions" and p.action == "delete")]
 
-                manager = next((r for r in roles if r.name == "Manager"), None)
+                # Manager: lecturas/updates concretos + users:create
                 if manager and not manager.permissions:
-                    manager.permissions = [p for p in permissions if p.action in ["read", "update"] or (p.resource == "users" and p.action == "create")]
+                    manager.permissions = [p for p in concrete if p.action in ["read", "update"] or (p.resource == "users" and p.action == "create")]
 
-                user_role = next((r for r in roles if r.name == "User"), None)
+                # User: dashboard/reports de lectura
                 if user_role and not user_role.permissions:
-                    user_role.permissions = [p for p in permissions if p.action == "read" and p.resource in ["dashboard", "reports"]]
+                    user_role.permissions = [p for p in concrete if p.action == "read" and p.resource in ["dashboard", "reports"]]
 
-                viewer = next((r for r in roles if r.name == "Viewer"), None)
+                # Viewer: lectura de cualquier recurso vía wildcard `*:read`
                 if viewer and not viewer.permissions:
-                    viewer.permissions = [p for p in permissions if p.action == "read"]
+                    viewer.permissions = [by_name["*:read"]]
 
-            db.commit()
+                db.commit()
+
+                # --- Regla DENY: Viewer NO puede leer auditoría, pese al wildcard `*:read` ---
+                if viewer and "audit:read" in by_name:
+                    _ensure_link(db, viewer.id, by_name["audit:read"].id, effect="deny")
+
+                # --- Regla con ASSERTION: User puede leer su propio registro de usuario ---
+                if user_role and "users:read" in by_name:
+                    _ensure_link(db, user_role.id, by_name["users:read"].id, assertion="owner")
+
+                # --- Jerarquía de roles: Admin -> Manager -> User ---
+                if admin and manager and not admin.parents:
+                    admin.parents = [manager]
+                if manager and user_role and not manager.parents:
+                    manager.parents = [user_role]
+
+                db.commit()
 
             users_data = [
                 {"username": "superadmin", "email": "superadmin@example.com", "full_name": "Super Administrator", "password": "admin123", "is_superuser": True, "role_name": "Super Admin"},
