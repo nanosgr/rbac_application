@@ -99,3 +99,4 @@ test_simple_connection.py
 #archivos de claude locales
 .claude
 *.xl*
+docs/
