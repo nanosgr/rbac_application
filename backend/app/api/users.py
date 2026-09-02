@@ -4,10 +4,13 @@ from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from sqlmodel import Session
 from app.db.database import get_db
-from app.services.crud import user_service
+from app.services.crud import user_service, user_scope_service
 from app.services.audit_service import audit_service
 from app.models.models import User, UserRead, UserCreate, UserUpdate
-from app.schemas.schemas import UserRoleAssignment, PaginatedResponse, UserProfileUpdate, PasswordChange
+from app.schemas.schemas import (
+    UserRoleAssignment, PaginatedResponse, UserProfileUpdate, PasswordChange,
+    UserScopeAssignment,
+)
 from app.core.deps import (
     get_current_active_user,
     require_user_read,
@@ -104,6 +107,47 @@ def change_password_me(
                       user_id=current_user.id, username=current_user.username, subject_id=current_user.id,
                       ip=ip, request_id=rid, user_agent=ua)
     return {"message": "Password updated successfully"}
+
+
+@router.get("/me/scopes")
+def read_my_scopes(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+):
+    items = user_scope_service.list_for_user(db, current_user.id)
+    return {"items": [{"dimension": s.dimension, "value": s.value} for s in items]}
+
+
+@router.get("/{user_id}/scopes")
+def read_user_scopes(
+    user_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_user_read()),
+):
+    if user_service.get_user(db, user_id) is None:
+        raise HTTPException(status_code=404, detail="User not found")
+    items = user_scope_service.list_for_user(db, user_id)
+    return {"items": [{"dimension": s.dimension, "value": s.value} for s in items]}
+
+
+@router.put("/{user_id}/scopes")
+def set_user_scopes(
+    request: Request,
+    user_id: int,
+    assignment: UserScopeAssignment,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_user_update()),
+):
+    if user_service.get_user(db, user_id) is None:
+        raise HTTPException(status_code=404, detail="User not found")
+    items = user_scope_service.replace_for_user(db, user_id, assignment.items)
+    payload = [{"dimension": s.dimension, "value": s.value} for s in items]
+    rid, ua, ip = _get_request_meta(request)
+    audit_service.log(db, action="set_scopes", resource="user", resource_id=user_id,
+                      user_id=current_user.id, username=current_user.username, subject_id=user_id,
+                      after_data=json.dumps(payload),
+                      ip=ip, request_id=rid, user_agent=ua)
+    return {"items": payload}
 
 
 @router.get("/{user_id}", response_model=UserRead)

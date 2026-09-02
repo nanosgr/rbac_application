@@ -34,6 +34,64 @@ export interface Permission {
   updated_at?: string;
 }
 
+// Rule / scoping types
+export type RuleEffect = 'allow' | 'deny';
+export type RuleScope = 'all' | 'own' | 'attribute';
+
+export interface PermissionRule {
+  permission_id: number;
+  effect: RuleEffect;
+  assertion?: string | null;
+  scope: RuleScope;
+  scope_dimension?: string | null;
+}
+
+export interface EffectivePermissions {
+  role_id: number;
+  contributing_role_ids: number[];
+  allow: string[];
+  deny: string[];
+  conditional: { pattern: string; assertion: string }[];
+  scoped: { pattern: string; scope: RuleScope; dimension: string | null }[];
+}
+
+export interface UserScope {
+  dimension: string;
+  value: string;
+}
+
+// Order (modelo de dominio de ejemplo con alcance de datos)
+export interface Order {
+  id: number;
+  customer: string;
+  total: number;
+  status: string;
+  warehouse: string;
+  owner_id: number | null;
+  created_at?: string;
+  updated_at?: string;
+}
+
+export interface CreateOrderDTO {
+  customer: string;
+  total: number;
+  warehouse: string;
+  status?: string;
+}
+
+export interface UpdateOrderDTO {
+  customer?: string;
+  total?: number;
+  warehouse?: string;
+  status?: string;
+}
+
+export interface GetOrdersParams {
+  page?: number;
+  size?: number;
+  status?: string;
+}
+
 // AuditLog types
 export interface AuditLog {
   id: number;

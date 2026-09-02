@@ -18,8 +18,9 @@ import Pagination from '@/components/common/Pagination';
 import UserAvatar from '@/components/common/UserAvatar';
 import ErrorAlert from '@/components/common/ErrorAlert';
 import ModalFooter from '@/components/common/ModalFooter';
+import UserScopesModal from '@/components/users/UserScopesModal';
 import { User, Role, CreateUserDTO, UpdateUserDTO, TableColumn, TableAction } from '@/types';
-import { UserPlus, Pencil, Trash2 } from 'lucide-react';
+import { UserPlus, Pencil, Trash2, Crosshair } from 'lucide-react';
 
 const USER_SEARCH_FIELDS = ['username', 'email', 'full_name'];
 
@@ -31,6 +32,7 @@ export default function UsersPage() {
   const [isLoading, setIsLoading] = useState(true);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingUser, setEditingUser] = useState<User | null>(null);
+  const [scopeUser, setScopeUser] = useState<User | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
   const [formData, setFormData] = useState<CreateUserDTO>({
@@ -188,6 +190,7 @@ export default function UsersPage() {
   ];
 
   const actions: TableAction<User>[] = [
+    { label: 'Alcances de datos', onClick: (u) => setScopeUser(u), permission: 'users:update', icon: <Crosshair className="w-3 h-3" /> },
     { label: 'Editar', onClick: handleEdit, variant: 'secondary', permission: 'users:update', icon: <Pencil className="w-3 h-3" /> },
     { label: 'Eliminar', onClick: handleDelete, variant: 'danger', permission: 'users:delete', icon: <Trash2 className="w-3 h-3" /> },
   ];
@@ -299,6 +302,8 @@ export default function UsersPage() {
           </label>
         </div>
       </Modal>
+
+      <UserScopesModal user={scopeUser} onClose={() => setScopeUser(null)} />
 
       <ConfirmationDialog />
     </DashboardLayout>

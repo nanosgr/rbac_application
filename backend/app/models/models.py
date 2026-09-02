@@ -1,7 +1,7 @@
 from typing import List, Optional
 from datetime import datetime
 from sqlmodel import SQLModel, Field, Relationship
-from sqlalchemy import Column, DateTime, Integer, ForeignKey
+from sqlalchemy import Column, DateTime, Integer, ForeignKey, Index, UniqueConstraint
 from sqlalchemy.sql import func
 from pydantic import EmailStr
 
@@ -31,6 +31,12 @@ class RolePermissionLink(SQLModel, table=True):
     # nombre de una assertion registrada en app.core.assertions; si está seteado la
     # regla es un allow condicional (otorga sólo si el predicado pasa en runtime)
     assertion: Optional[str] = Field(default=None)
+    # alcance de datos del allow: "all" (default, todas las filas) | "own" (solo las
+    # del usuario, comparando el atributo de propiedad) | "attribute" (las que
+    # coinciden con los valores del usuario en `scope_dimension`, ver tabla user_scopes)
+    scope: str = Field(default="all")
+    # dimensión de user_scopes a comparar cuando scope == "attribute" (ej. "warehouse")
+    scope_dimension: Optional[str] = Field(default=None)
     assigned_at: Optional[datetime] = Field(
         default=None,
         sa_column=Column(DateTime(timezone=True), server_default=func.now()),
@@ -259,6 +265,87 @@ class PasswordResetToken(SQLModel, table=True):
         default=None,
         sa_column=Column(DateTime(timezone=True), server_default=func.now()),
     )
+
+
+# ---------------------------------------------------------------------------
+# Scoping de datos (alcance por atributo del usuario)
+# ---------------------------------------------------------------------------
+
+class UserScope(SQLModel, table=True):
+    """Valor que ubica al usuario dentro de una dimensión de alcance.
+
+    Ej.: `(user_id=4, dimension="warehouse", value="norte")` => el usuario 4
+    pertenece al depósito "norte". Una regla `role_permissions` con
+    `scope="attribute"` y `scope_dimension="warehouse"` limita las filas visibles
+    a las que coinciden con estos valores.
+    """
+
+    __tablename__ = "user_scopes"
+    __table_args__ = (
+        UniqueConstraint("user_id", "dimension", "value", name="uq_user_scope"),
+        Index("ix_user_scopes_user_dimension", "user_id", "dimension"),
+    )
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    user_id: int = Field(
+        sa_column=Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False),
+    )
+    dimension: str
+    value: str
+
+
+class UserScopeRead(SQLModel):
+    dimension: str
+    value: str
+
+
+# ---------------------------------------------------------------------------
+# Order — modelo de dominio de ejemplo para demostrar el scoping
+# ---------------------------------------------------------------------------
+
+class OrderBase(SQLModel):
+    customer: str
+    total: float = 0.0
+    status: str = "pending"
+    # dimensión "warehouse": habilita reglas scope="attribute"/scope_dimension="warehouse"
+    warehouse: str
+
+
+class Order(OrderBase, table=True):
+    __tablename__ = "orders"
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    # vendedor que creó el pedido: habilita reglas scope="own"
+    owner_id: Optional[int] = Field(
+        default=None,
+        sa_column=Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True),
+    )
+    created_at: Optional[datetime] = Field(
+        default=None,
+        sa_column=Column(DateTime(timezone=True), server_default=func.now()),
+    )
+    updated_at: Optional[datetime] = Field(
+        default=None,
+        sa_column=Column(DateTime(timezone=True), onupdate=func.now(), nullable=True),
+    )
+
+
+class OrderCreate(OrderBase):
+    pass
+
+
+class OrderRead(OrderBase):
+    id: int
+    owner_id: Optional[int] = None
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
+
+
+class OrderUpdate(SQLModel):
+    customer: Optional[str] = None
+    total: Optional[float] = None
+    status: Optional[str] = None
+    warehouse: Optional[str] = None
 
 
 # Resolver referencias circulares

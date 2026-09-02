@@ -19,6 +19,13 @@ import {
   GetAuditLogsParams,
   PasswordResetRequestDTO,
   PasswordResetConfirmDTO,
+  PermissionRule,
+  EffectivePermissions,
+  UserScope,
+  Order,
+  CreateOrderDTO,
+  UpdateOrderDTO,
+  GetOrdersParams,
 } from '@/types';
 
 function buildQuery(params: Record<string, string | number | boolean | undefined>): string {
@@ -60,6 +67,15 @@ export const userService = {
 
   assignRoles: (id: number, roleIds: number[]) =>
     apiClient.post<User>(`/users/${id}/roles`, { user_id: id, role_ids: roleIds }),
+
+  getScopes: (id: number) =>
+    apiClient.get<{ items: UserScope[] }>(`/users/${id}/scopes`),
+
+  setScopes: (id: number, items: UserScope[]) =>
+    apiClient.put<{ items: UserScope[] }>(`/users/${id}/scopes`, { items }),
+
+  getMyScopes: () =>
+    apiClient.get<{ items: UserScope[] }>('/users/me/scopes'),
 };
 
 // Role Service
@@ -81,6 +97,15 @@ export const roleService = {
 
   assignPermissions: (id: number, permissionIds: number[]) =>
     apiClient.post<Role>(`/roles/${id}/permissions`, { role_id: id, permission_ids: permissionIds }),
+
+  assignPermissionRules: (id: number, rules: PermissionRule[]) =>
+    apiClient.post<Role>(`/roles/${id}/permissions`, { role_id: id, rules }),
+
+  getPermissionRules: (id: number) =>
+    apiClient.get<PermissionRule[]>(`/roles/${id}/permissions`),
+
+  getEffectivePermissions: (id: number) =>
+    apiClient.get<EffectivePermissions>(`/roles/${id}/effective-permissions`),
 };
 
 // Permission Service
@@ -105,6 +130,24 @@ export const permissionService = {
 
   getAvailableActions: () =>
     apiClient.get<{ actions: string[] }>('/permissions/actions/available'),
+};
+
+// Order Service (recurso de dominio con alcance de datos)
+export const orderService = {
+  getAll: (params: GetOrdersParams = {}) =>
+    apiClient.get<PaginatedResponse<Order>>(`/orders/${buildQuery(params as Record<string, string | number | boolean | undefined>)}`),
+
+  getById: (id: number) =>
+    apiClient.get<Order>(`/orders/${id}`),
+
+  create: (data: CreateOrderDTO) =>
+    apiClient.post<Order>('/orders/', data),
+
+  update: (id: number, data: UpdateOrderDTO) =>
+    apiClient.put<Order>(`/orders/${id}`, data),
+
+  delete: (id: number) =>
+    apiClient.delete<void>(`/orders/${id}`),
 };
 
 // Audit Service

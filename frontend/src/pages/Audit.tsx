@@ -18,6 +18,8 @@ const ACTION_OPTIONS = [
   { value: 'delete', label: 'Eliminar' },
   { value: 'assign_roles', label: 'Asignar roles' },
   { value: 'assign_permissions', label: 'Asignar permisos' },
+  { value: 'assign_parents', label: 'Asignar roles padre' },
+  { value: 'set_scopes', label: 'Definir alcances' },
   { value: 'password_change', label: 'Cambio de contraseña' },
 ];
 
@@ -27,6 +29,7 @@ const RESOURCE_OPTIONS = [
   { value: 'user', label: 'Usuario' },
   { value: 'role', label: 'Rol' },
   { value: 'permission', label: 'Permiso' },
+  { value: 'order', label: 'Pedido' },
 ];
 
 const STATUS_OPTIONS = [

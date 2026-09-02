@@ -3,8 +3,9 @@ from sqlalchemy import select as sa_select
 from sqlalchemy.orm import selectinload
 from typing import List, Optional
 from app.models.models import (
-    User, Role, Permission, RolePermissionLink, RoleParentLink,
+    User, Role, Permission, RolePermissionLink, RoleParentLink, UserScope, Order,
     UserCreate, UserUpdate, RoleCreate, RoleUpdate, PermissionCreate, PermissionUpdate,
+    OrderCreate, OrderUpdate,
 )
 from app.core.security import get_password_hash, verify_password
 from app.core import rbac
@@ -184,7 +185,11 @@ class RoleService:
 
     def assign_permissions_to_role(self, db: Session, role_id: int, rules) -> Optional[Role]:
         """Reemplaza las reglas rol->permiso. `rules` es una lista de objetos con
-        `permission_id`, `effect` ("allow"/"deny") y `assertion` opcional."""
+        `permission_id`, `effect` ("allow"/"deny"), `assertion` opcional y
+        `scope` ("all"/"own"/"attribute") con `scope_dimension` opcional.
+
+        Lanza ValueError si `scope == "attribute"` sin `scope_dimension`.
+        """
         db_role = self.get_role(db, role_id)
         if not db_role:
             return None
@@ -195,21 +200,40 @@ class RoleService:
             db.exec(select(Permission.id).where(Permission.id.in_(wanted_ids))).all()
         ) if wanted_ids else set()
 
+        # Normalizar + validar antes de tocar la DB (falla limpio con ValueError).
+        normalized = []
+        for r in rules:
+            if r.permission_id not in valid_ids:
+                continue
+            effect = (getattr(r, "effect", None) or "allow").lower()
+            scope = (getattr(r, "scope", None) or "all").lower()
+            if scope not in ("all", "own", "attribute"):
+                scope = "all"
+            dimension = getattr(r, "scope_dimension", None) or None
+            if scope == "attribute" and not dimension:
+                raise ValueError("scope_dimension is required when scope is 'attribute'")
+            normalized.append((
+                r.permission_id,
+                effect if effect in ("allow", "deny") else "allow",
+                getattr(r, "assertion", None) or None,
+                scope,
+                dimension if scope == "attribute" else None,
+            ))
+
         for link in db.exec(
             select(RolePermissionLink).where(RolePermissionLink.role_id == role_id)
         ).all():
             db.delete(link)
         db.flush()
 
-        for r in rules:
-            if r.permission_id not in valid_ids:
-                continue
-            effect = (getattr(r, "effect", None) or "allow").lower()
+        for permission_id, effect, assertion, scope, dimension in normalized:
             db.add(RolePermissionLink(
                 role_id=role_id,
-                permission_id=r.permission_id,
-                effect=effect if effect in ("allow", "deny") else "allow",
-                assertion=getattr(r, "assertion", None) or None,
+                permission_id=permission_id,
+                effect=effect,
+                assertion=assertion,
+                scope=scope,
+                scope_dimension=dimension,
             ))
         db.commit()
         rbac.invalidate_policy_cache()
@@ -267,6 +291,24 @@ class RoleService:
         rbac.invalidate_policy_cache()
         return self.get_role(db, role_id)
 
+    def get_role_rules(self, db: Session, role_id: int) -> Optional[list]:
+        """Reglas directas del rol (sin resolver jerarquía) — para prefilar la UI."""
+        if self.get_role(db, role_id) is None:
+            return None
+        rows = db.exec(
+            select(RolePermissionLink).where(RolePermissionLink.role_id == role_id)
+        ).all()
+        return [
+            {
+                "permission_id": r.permission_id,
+                "effect": r.effect,
+                "assertion": r.assertion,
+                "scope": getattr(r, "scope", "all") or "all",
+                "scope_dimension": r.scope_dimension,
+            }
+            for r in rows
+        ]
+
     def get_effective_permissions(self, db: Session, role_id: int) -> Optional[dict]:
         """Devuelve las reglas efectivas del rol resueltas sobre su jerarquía."""
         db_role = self.get_role(db, role_id)
@@ -277,6 +319,7 @@ class RoleService:
         allow: set = set()
         deny: set = set()
         conditional: list = []
+        scoped: list = []
         if contributing:
             rows = db.exec(
                 select(RolePermissionLink, Permission)
@@ -290,6 +333,12 @@ class RoleService:
                     conditional.append({"pattern": pattern, "assertion": link.assertion})
                 elif link.effect == "deny":
                     deny.add(pattern)
+                elif getattr(link, "scope", "all") not in (None, "", "all"):
+                    scoped.append({
+                        "pattern": pattern,
+                        "scope": link.scope,
+                        "dimension": link.scope_dimension,
+                    })
                 else:
                     allow.add(pattern)
         return {
@@ -298,6 +347,7 @@ class RoleService:
             "allow": sorted(allow),
             "deny": sorted(deny),
             "conditional": conditional,
+            "scoped": scoped,
         }
 
 
@@ -370,6 +420,80 @@ class PermissionService:
         return False
 
 
+class UserScopeService:
+    """Valores de alcance por usuario (tabla user_scopes)."""
+
+    def list_for_user(self, db: Session, user_id: int) -> List[UserScope]:
+        return list(db.exec(select(UserScope).where(UserScope.user_id == user_id)).all())
+
+    def replace_for_user(self, db: Session, user_id: int, items) -> List[UserScope]:
+        """Reemplaza el set completo de scopes del usuario. `items` = objetos con
+        `dimension` y `value`."""
+        for sc in db.exec(select(UserScope).where(UserScope.user_id == user_id)).all():
+            db.delete(sc)
+        db.flush()
+        seen = set()
+        for it in items or []:
+            dimension = (getattr(it, "dimension", None) or "").strip()
+            value = str(getattr(it, "value", "") or "").strip()
+            if not dimension or not value:
+                continue
+            key = (dimension, value)
+            if key in seen:
+                continue
+            seen.add(key)
+            db.add(UserScope(user_id=user_id, dimension=dimension, value=value))
+        db.commit()
+        rbac.invalidate_policy_cache()
+        return self.list_for_user(db, user_id)
+
+
+class OrderService:
+    """CRUD del modelo de dominio de ejemplo, con filtrado por `Scope`."""
+
+    def get(self, db: Session, order_id: int) -> Optional[Order]:
+        return db.get(Order, order_id)
+
+    def list(self, db: Session, scope, *, skip: int = 0, limit: int = 100,
+             status: Optional[str] = None) -> List[Order]:
+        stmt = scope.apply(select(Order), Order)
+        if status:
+            stmt = stmt.where(Order.status == status)
+        return list(db.exec(stmt.order_by(Order.id).offset(skip).limit(limit)).all())
+
+    def count(self, db: Session, scope, *, status: Optional[str] = None) -> int:
+        stmt = scope.apply(select(func.count(Order.id)), Order)
+        if status:
+            stmt = stmt.where(Order.status == status)
+        return db.exec(stmt).one()
+
+    def create(self, db: Session, data: OrderCreate, *, owner_id: Optional[int]) -> Order:
+        order = Order(**data.model_dump(), owner_id=owner_id)
+        db.add(order)
+        db.commit()
+        db.refresh(order)
+        return order
+
+    def update(self, db: Session, order_id: int, data: OrderUpdate) -> Optional[Order]:
+        order = db.get(Order, order_id)
+        if order:
+            for field, value in data.model_dump(exclude_unset=True).items():
+                setattr(order, field, value)
+            db.commit()
+            db.refresh(order)
+        return order
+
+    def delete(self, db: Session, order_id: int) -> bool:
+        order = db.get(Order, order_id)
+        if order:
+            db.delete(order)
+            db.commit()
+            return True
+        return False
+
+
 user_service = UserService()
 role_service = RoleService()
 permission_service = PermissionService()
+user_scope_service = UserScopeService()
+order_service = OrderService()

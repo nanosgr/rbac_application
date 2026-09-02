@@ -1,5 +1,26 @@
 # Changelog - Frontend RBAC Application
 
+## [1.2.0] - 2026-09-02
+
+### ✨ Alcance de datos (data scoping)
+
+- **Roles** (`pages/Roles.tsx`): el asignador de permisos pasó de checkboxes planos a un
+  **editor de reglas** por permiso — `effect` (permitir / denegar) y `scope`
+  (todos / propios / por atributo + dimensión). Nueva acción **"Permisos efectivos"**
+  (`components/roles/EffectivePermissionsModal.tsx`) que muestra allow / deny / condicionales /
+  acotados resueltos sobre la jerarquía.
+- **Usuarios** (`pages/Users.tsx`): nueva acción **"Alcances de datos"**
+  (`components/users/UserScopesModal.tsx`) para gestionar las filas `user_scopes`
+  (pares dimensión = valor, ej. `warehouse = norte`).
+- **Pedidos** (`pages/Orders.tsx`, ruta `/orders`, ítem de sidebar): página CRUD del modelo
+  de dominio de ejemplo. La lista llega ya filtrada por el alcance del usuario; banner que
+  explica el filtrado y muestra los alcances propios (`GET /users/me/scopes`).
+- **API** (`lib/api/services.ts`): `roleService.assignPermissionRules` / `getPermissionRules` /
+  `getEffectivePermissions`; `userService.getScopes` / `setScopes` / `getMyScopes`;
+  `orderService` (CRUD). Tipos nuevos en `types/index.ts`, opciones en `lib/constants.ts`.
+- **Auditoría** (`pages/Audit.tsx`): filtros para recurso `order` y acciones
+  `set_scopes` / `assign_parents`.
+
 ## [1.1.0] - 2025-01-08
 
 ### ✨ Nuevas Características

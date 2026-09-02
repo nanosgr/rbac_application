@@ -1,3 +1,4 @@
+from collections import namedtuple
 from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from sqlmodel import Session
@@ -95,6 +96,35 @@ def has_permission(
     """Evaluación completa (incluye wildcards, DENY y assertions con contexto)."""
     policy = rbac.get_cached_policy(db, current_user)
     return rbac.evaluate(policy, resource, action, user=current_user, context=context) is True
+
+
+# Valor que devuelve `require_scope`: el usuario + su alcance de datos resuelto.
+ScopedAccess = namedtuple("ScopedAccess", ["user", "scope"])
+
+
+def require_scope(resource: str, action: str):
+    """Dependencia para endpoints con alcance de datos ("¿sobre qué filas?").
+
+    Otorga si hay un `allow` (todas), una regla `scope` (`own`/`attribute`) o el
+    wildcard del superusuario; deniega (403) sólo si hay `deny` o ninguna regla.
+    El endpoint debe aplicar el `Scope` resultante: `access.scope.apply(stmt, Model)`
+    en listados y `access.scope.matches(row)` sobre una fila cargada.
+    """
+
+    def scope_dep(
+        current_user: User = Depends(get_current_active_user),
+        db: Session = Depends(get_db),
+    ) -> ScopedAccess:
+        policy = rbac.get_cached_policy(db, current_user)
+        scope = rbac.resolve_scope(policy, resource, action, current_user)
+        if scope.denied or not scope.granted:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail=f"Permission denied. Required: {resource}:{action}",
+            )
+        return ScopedAccess(current_user, scope)
+
+    return scope_dep
 
 
 def check_owner_or_permission(

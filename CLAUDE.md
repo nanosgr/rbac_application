@@ -102,9 +102,16 @@ allowed: `users:*`, `*:read`, `*:*` (matched by `rbac.pattern_matches`).
 - **Assertions:** `role_permissions.assertion` names a predicate registered in
   `app/core/assertions.py` (built-in: `owner`). Evaluated at request time with a
   `context` dict supplied by the endpoint.
+- **Data scoping ("which rows"):** `role_permissions.scope` is `"all"` (default),
+  `"own"` or `"attribute"` (+ `scope_dimension`, e.g. `"warehouse"`). Values that place
+  the user in a dimension live in table `user_scopes` (`user_id, dimension, value`).
+  `rbac.resolve_scope(policy, resource, action, user) -> Scope`; the `Scope` object
+  filters a query (`scope.apply(stmt, Model)`) and checks a loaded row
+  (`scope.matches(row)`). `own` + `attribute` combine as OR; `deny` still wins;
+  a plain `allow` (or superuser `*:*`) → `allow_all`.
 - **Ternary result:** `rbac.evaluate(...) -> True | False | None`.
-- **Cache:** `_policy_cache` (TTL 60s, key `(username, token_version)`); mutations call
-  `rbac.invalidate_policy_cache()`.
+- **Cache:** `_policy_cache` (TTL 60s, key `(username, token_version)`); mutations
+  (incl. `user_scopes` via `user_scope_service`) call `rbac.invalidate_policy_cache()`.
 
 **Permission Checking:**
 1. Superusers get the `{"*:*"}` policy (not a special code path).
@@ -113,6 +120,9 @@ allowed: `users:*`, `*:read`, `*:*` (matched by `rbac.pattern_matches`).
    rules do NOT grant here).
 4. `has_permission(user, resource, action, *, db, context=...)` — full evaluation
    including assertions; call inside the endpoint body.
+5. `require_scope("orders", "read")` — dependency returning `ScopedAccess(user, scope)`;
+   403 only on `deny` / no rule. The endpoint applies `access.scope` to the query and to
+   loaded rows (see `app/api/orders.py`, the reference domain model).
 
 **Example endpoint with permissions:**
 ```python
@@ -132,9 +142,12 @@ def get_pedido(pid: int, db: Session = Depends(get_db),
 ```
 
 **Role hierarchy API:** `POST /api/v1/roles/{id}/parents` (assign parents, 400 on cycle),
-`GET /api/v1/roles/{id}/effective-permissions` (resolved allow/deny/conditional).
+`GET /api/v1/roles/{id}/effective-permissions` (resolved allow/deny/conditional/scoped).
 `POST /api/v1/roles/{id}/permissions` accepts either `permission_ids` or richer `rules`
-(`{permission_id, effect, assertion}`).
+(`{permission_id, effect, assertion, scope, scope_dimension}`).
+
+**Scope admin API:** `GET/PUT /api/v1/users/{id}/scopes` and `GET /api/v1/users/me/scopes`
+manage a user's `user_scopes` rows (`{items: [{dimension, value}]}`; PUT replaces the set).
 
 **Convenience functions:** Use `require_user_read()`, `require_role_create()`, etc. from `app/core/deps.py` for common permission checks.
 
@@ -150,8 +163,12 @@ The system uses two levels of database abstraction:
 
 **Key relationships:**
 - Users ↔ Roles (many-to-many via user_roles)
-- Roles ↔ Permissions (many-to-many via role_permissions; carries `effect` + `assertion`)
+- Roles ↔ Permissions (many-to-many via role_permissions; carries `effect` + `assertion` +
+  `scope` / `scope_dimension`)
 - Roles ↔ Roles (many-to-many via role_parents; role hierarchy DAG)
+- Users → scope values (`user_scopes`: `user_id, dimension, value`)
+- `orders` — reference domain model demonstrating data scoping (`owner_id` for `own`,
+  `warehouse` column for `attribute` dimension `"warehouse"`)
 
 ### Authentication Flow
 
@@ -190,9 +207,10 @@ Configuration is loaded via Pydantic Settings in `app/core/config.py`.
 All endpoints are prefixed with `/api/v1`:
 
 - **Auth:** `/auth/login`, `/auth/login-json`
-- **Users:** `/users/` (CRUD + `/users/me` for current user)
+- **Users:** `/users/` (CRUD + `/users/me` for current user + `/users/{id}/scopes`)
 - **Roles:** `/roles/` (CRUD + `/roles/{id}/permissions` to assign permissions)
 - **Permissions:** `/permissions/` (CRUD)
+- **Orders:** `/orders/` (CRUD; reference model for data-scoped access via `require_scope`)
 
 API documentation available at `http://localhost:8000/docs` when running.
 
@@ -200,5 +218,8 @@ API documentation available at `http://localhost:8000/docs` when running.
 
 - The database has both native PostgreSQL functions (in `database/`) and SQLAlchemy models (in `backend/app/models/`). When adding features, consider which layer to modify.
 - Some files have `_debug` suffixes - these are debugging versions and should not be used in production.
-- The frontend folder is empty and not yet implemented.
+- `frontend/` is a React 19 + Vite + Tailwind v4 SPA (`npm run dev` / `npm run build`).
+  Pages under `src/pages/`, API layer `src/lib/api/services.ts`, auth in `src/context/AuthContext.tsx`.
+  The Roles page has a per-permission rule editor (effect + scope); Users has a `user_scopes`
+  editor; `src/pages/Orders.tsx` demonstrates data-scoped CRUD.
 - Always change default passwords and SECRET_KEY before deploying to production.

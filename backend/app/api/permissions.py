@@ -61,7 +61,7 @@ def create_permission(
 
 @router.get("/resources/available")
 def get_available_resources(current_user: User = Depends(require_permission_read())):
-    return {"resources": ["users", "roles", "permissions", "dashboard", "reports", "settings"]}
+    return {"resources": ["users", "roles", "permissions", "orders", "dashboard", "reports", "settings", "audit"]}
 
 
 @router.get("/actions/available")

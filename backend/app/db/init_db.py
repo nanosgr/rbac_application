@@ -1,6 +1,6 @@
 from sqlmodel import SQLModel, Session, select
 from app.db.database import engine
-from app.models.models import User, Role, Permission, RolePermissionLink
+from app.models.models import User, Role, Permission, RolePermissionLink, UserScope, Order
 from app.core.security import get_password_hash
 
 
@@ -8,13 +8,15 @@ def create_tables():
     SQLModel.metadata.create_all(bind=engine)
 
 
-def _ensure_link(db, role_id, permission_id, *, effect="allow", assertion=None):
-    """Crea (idempotente) una regla role->permission con effect/assertion."""
+def _ensure_link(db, role_id, permission_id, *, effect="allow", assertion=None,
+                 scope="all", scope_dimension=None):
+    """Crea (idempotente) una regla role->permission con effect/assertion/scope."""
     link = db.get(RolePermissionLink, (role_id, permission_id))
     if link is None:
         db.add(RolePermissionLink(
             role_id=role_id, permission_id=permission_id,
             effect=effect, assertion=assertion,
+            scope=scope, scope_dimension=scope_dimension,
         ))
 
 
@@ -40,6 +42,11 @@ def init_db():
                 {"name": "settings:read", "description": "View settings", "resource": "settings", "action": "read"},
                 {"name": "settings:update", "description": "Update settings", "resource": "settings", "action": "update"},
                 {"name": "audit:read", "description": "View audit logs", "resource": "audit", "action": "read"},
+                # --- recurso de dominio de ejemplo para el scoping de datos ---
+                {"name": "orders:create", "description": "Create orders", "resource": "orders", "action": "create"},
+                {"name": "orders:read", "description": "Read orders", "resource": "orders", "action": "read"},
+                {"name": "orders:update", "description": "Update orders", "resource": "orders", "action": "update"},
+                {"name": "orders:delete", "description": "Delete orders", "resource": "orders", "action": "delete"},
                 # --- wildcards (demostración del matching resource/action con `*`) ---
                 {"name": "*:*", "description": "Full access (wildcard)", "resource": "*", "action": "*"},
                 {"name": "*:read", "description": "Read any resource (wildcard)", "resource": "*", "action": "read"},
@@ -69,6 +76,8 @@ def init_db():
                 {"name": "Manager", "description": "Management access"},
                 {"name": "User", "description": "Basic user access"},
                 {"name": "Viewer", "description": "Read-only access"},
+                {"name": "Vendedor", "description": "Acceso a los pedidos propios (scope=own)"},
+                {"name": "Jefe de Deposito", "description": "Acceso a los pedidos de su depósito (scope=attribute/warehouse)"},
             ]
 
             roles = []
@@ -91,6 +100,8 @@ def init_db():
             manager = by_role.get("Manager")
             user_role = by_role.get("User")
             viewer = by_role.get("Viewer")
+            vendedor = by_role.get("Vendedor")
+            jefe_deposito = by_role.get("Jefe de Deposito")
 
             if roles and permissions:
                 # Super Admin: una sola regla wildcard `*:*`
@@ -131,11 +142,30 @@ def init_db():
 
                 db.commit()
 
+                # --- Scoping de datos sobre `orders` (modelo de dominio de ejemplo) ---
+                # Vendedor: sólo sus propios pedidos (scope="own", comparado con owner_id).
+                if vendedor:
+                    for perm_name in ("orders:read", "orders:create"):
+                        if perm_name in by_name:
+                            _ensure_link(db, vendedor.id, by_name[perm_name].id, scope="own")
+                # Jefe de Depósito: los pedidos de los depósitos a los que pertenece
+                # (scope="attribute", dimensión "warehouse" -> tabla user_scopes).
+                if jefe_deposito:
+                    for perm_name in ("orders:read", "orders:update"):
+                        if perm_name in by_name:
+                            _ensure_link(db, jefe_deposito.id, by_name[perm_name].id,
+                                         scope="attribute", scope_dimension="warehouse")
+
+                db.commit()
+
             users_data = [
                 {"username": "superadmin", "email": "superadmin@example.com", "full_name": "Super Administrator", "password": "admin123", "is_superuser": True, "role_name": "Super Admin"},
                 {"username": "admin", "email": "admin@example.com", "full_name": "Administrator", "password": "admin123", "is_superuser": False, "role_name": "Admin"},
                 {"username": "manager", "email": "manager@example.com", "full_name": "Manager User", "password": "manager123", "is_superuser": False, "role_name": "Manager"},
                 {"username": "user", "email": "user@example.com", "full_name": "Regular User", "password": "user123", "is_superuser": False, "role_name": "User"},
+                {"username": "vendedor1", "email": "vendedor1@example.com", "full_name": "Vendedor Uno", "password": "vendedor123", "is_superuser": False, "role_name": "Vendedor"},
+                {"username": "vendedor2", "email": "vendedor2@example.com", "full_name": "Vendedor Dos", "password": "vendedor123", "is_superuser": False, "role_name": "Vendedor"},
+                {"username": "jefe_dep_norte", "email": "jefe_norte@example.com", "full_name": "Jefe Depósito Norte", "password": "jefe123", "is_superuser": False, "role_name": "Jefe de Deposito"},
             ]
 
             for user_data in users_data:
@@ -148,6 +178,28 @@ def init_db():
                     if role:
                         user.roles.append(role)
                     db.add(user)
+
+            db.commit()
+
+            # --- Valores de alcance del usuario (dimensión "warehouse") ---
+            jefe = db.exec(select(User).where(User.username == "jefe_dep_norte")).first()
+            if jefe:
+                existing_scope = db.exec(
+                    select(UserScope).where(UserScope.user_id == jefe.id, UserScope.dimension == "warehouse")
+                ).first()
+                if not existing_scope:
+                    db.add(UserScope(user_id=jefe.id, dimension="warehouse", value="norte"))
+
+            # --- Pedidos de ejemplo repartidos por owner_id y warehouse ---
+            v1 = db.exec(select(User).where(User.username == "vendedor1")).first()
+            v2 = db.exec(select(User).where(User.username == "vendedor2")).first()
+            if v1 and v2 and not db.exec(select(Order)).first():
+                db.add_all([
+                    Order(customer="Cliente A", total=1200.0, status="pending", warehouse="norte", owner_id=v1.id),
+                    Order(customer="Cliente B", total=850.5, status="paid", warehouse="sur", owner_id=v1.id),
+                    Order(customer="Cliente C", total=430.0, status="pending", warehouse="norte", owner_id=v2.id),
+                    Order(customer="Cliente D", total=2100.0, status="paid", warehouse="centro", owner_id=v2.id),
+                ])
 
             db.commit()
             print("Base de datos inicializada correctamente!")

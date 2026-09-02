@@ -402,6 +402,7 @@ Una vez obtenido el nuevo token, todos los requests reintentados lo usan.
 Usuario → (N roles activos + roles ancestros) → (N reglas de permiso)
 
 Regla de permiso = permiso { resource, action }  +  effect (allow|deny)  +  assertion?
+                   +  scope (all|own|attribute) [+ scope_dimension]
 ```
 
 **Modelo de datos** (columnas/tablas nuevas marcadas):
@@ -414,6 +415,7 @@ erDiagram
     permissions ||--o{ role_permissions : ""
     roles ||--o{ role_parents : "role_id (hijo)"
     roles ||--o{ role_parents : "parent_id (padre)"
+    users ||--o{ user_scopes : ""
 
     users {
         int id PK
@@ -435,12 +437,20 @@ erDiagram
     role_permissions {
         int role_id PK
         int permission_id PK
-        string effect "NUEVO - allow o deny"
-        string assertion "NUEVO - predicado, nullable"
+        string effect "allow o deny"
+        string assertion "predicado, nullable"
+        string scope "NUEVO - all|own|attribute"
+        string scope_dimension "NUEVO - ej. warehouse, nullable"
     }
     role_parents {
-        int role_id PK "TABLA NUEVA - DAG"
+        int role_id PK "DAG"
         int parent_id PK
+    }
+    user_scopes {
+        int id PK "TABLA NUEVA"
+        int user_id FK
+        string dimension "ej. warehouse"
+        string value "ej. norte"
     }
 ```
 
@@ -528,6 +538,71 @@ pasa sólo para sus propios pedidos.
 
 > `check_owner_or_permission()` queda como shim deprecado sobre `has_permission()`.
 > `require_owner_or_permission()` fue eliminado (no tenía uso).
+
+### 3.8b Alcance de datos — "¿sobre qué filas?" (data scoping)
+
+Las assertions responden "¿puede?" fila por fila, pero no filtran un **listado** ni son
+configurables como dato. Para "el administrador de sistemas ve todos los pedidos, el
+vendedor sólo los suyos, el jefe de depósito sólo los de su depósito", cada regla
+`role_permissions` lleva además un **`scope`** que el admin elige al parametrizar el
+permiso:
+
+| `scope` | Filas que concede | Requiere |
+|---|---|---|
+| `all` (default) | todas | — |
+| `own` | las del usuario (`Model.owner_id == user.id`) | columna de propiedad en el modelo |
+| `attribute` | las que matchean los valores del usuario en `scope_dimension` | `scope_dimension` (ej. `warehouse`) + filas en `user_scopes` + columna homónima en el modelo |
+
+`own` y `attribute` de un mismo `resource:action` se combinan como **OR**; una regla
+`deny` sigue ganando; un `allow` plano (o el `*:*` del superusuario) da acceso total.
+
+**Convención:** la columna del modelo se llama igual que la dimensión
+(`scope_dimension="warehouse"` → `Model.warehouse`). El atributo de propiedad es
+`owner_id` por defecto (`owner_attr=` para cambiarlo).
+
+**1. Valores del usuario** (`user_scopes`), vía API:
+
+```json
+PUT /api/v1/users/7/scopes
+{ "items": [ { "dimension": "warehouse", "value": "norte" } ] }
+```
+
+**2. Regla del rol** con `scope` (endpoint `POST /roles/{id}/permissions`):
+
+```json
+{ "role_id": 4, "rules": [
+  { "permission_id": 12, "scope": "own" },
+  { "permission_id": 12, "scope": "attribute", "scope_dimension": "warehouse" }
+] }
+```
+
+**3. Endpoint** con la dependencia `require_scope(resource, action)` — devuelve
+`ScopedAccess(user, scope)`; 403 sólo si hay `deny` o ninguna regla:
+
+```python
+from app.core.deps import require_scope, ScopedAccess
+
+@router.get("/", response_model=PaginatedResponse[OrderRead])
+def list_orders(db: Session = Depends(get_db),
+                access: ScopedAccess = Depends(require_scope("orders", "read"))):
+    total = order_service.count(db, access.scope)                 # scope.apply() en el WHERE
+    items = order_service.list(db, access.scope, skip=0, limit=10)
+    ...
+
+@router.get("/{oid}", response_model=OrderRead)
+def get_order(oid: int, db: Session = Depends(get_db),
+              access: ScopedAccess = Depends(require_scope("orders", "read"))):
+    order = order_service.get(db, oid)
+    if order is None or not access.scope.matches(order):          # chequeo objeto
+        raise HTTPException(404)
+    return order
+```
+
+El servicio hace `stmt = scope.apply(select(Order), Order)` antes de `offset/limit` y del
+`func.count`, así la paginación (`total`) queda coherente. Motor: `rbac.resolve_scope()`
++ la dataclass `rbac.Scope`. Modelo de referencia completo: `app/api/orders.py`,
+`Order` en `app/models/models.py`, `OrderService` en `app/services/crud.py`. Tests:
+`backend/tests/test_scoping.py`.
 
 ### 3.9 Rate limiting
 
@@ -862,12 +937,18 @@ _ensure_link(db, consultor.id, by_name["audit:read"].id, effect="deny")
 
 # Assertion: Operador sólo edita los productos que creó
 _ensure_link(db, operador.id, by_name["productos:update"].id, assertion="owner")
+
+# Scope: Operador sólo ve sus productos; Supervisor sólo los de su sucursal
+_ensure_link(db, operador.id, by_name["productos:read"].id, scope="own")
+_ensure_link(db, supervisor.id, by_name["productos:read"].id,
+             scope="attribute", scope_dimension="sucursal")
 ```
 
-`_ensure_link(db, role_id, permission_id, *, effect="allow", assertion=None)` es un
-helper idempotente de `init_db.py` para crear filas `role_permissions` con
-`effect`/`assertion` (las asignaciones por lista `role.permissions = [...]` siempre son
-`allow` sin assertion).
+`_ensure_link(db, role_id, permission_id, *, effect="allow", assertion=None,
+scope="all", scope_dimension=None)` es un helper idempotente de `init_db.py` para crear
+filas `role_permissions` (las asignaciones por lista `role.permissions = [...]` siempre
+son `allow`, sin assertion, `scope="all"`). Para `scope="attribute"` hay que además
+sembrar filas en `user_scopes` (`UserScope(user_id=..., dimension="sucursal", value=...)`).
 
 ### 5.4 Agregar helpers de permisos en `deps.py`
 
@@ -1393,16 +1474,21 @@ un permiso de un rol puede llevar `assertion="owner"`, `assertion="same_region"`
 y el endpoint las evalúa con `has_permission(..., context=...)`. Las assertions se
 registran en `app/core/assertions.py`.
 
-**Límites:**
+Para el caso frecuente "todas / propias / por atributo" no hace falta escribir una
+assertion: la regla lleva un `scope` configurable desde la API (ver **3.8b** —
+`rbac.resolve_scope()` + `Scope`, dependencia `require_scope()`, tabla `user_scopes`).
+
+**Límites (de las assertions):**
 - Las assertions son código (no configurables desde la UI ni la DB, sólo se referencian
-  por nombre).
+  por nombre). El `scope` sí es dato.
 - El `context` lo arma cada endpoint manualmente; no hay un motor de políticas que
   cargue el recurso automáticamente.
 - No hay composición de políticas de varias fuentes (aunque `evaluate()` ya devuelve un
   resultado ternario `True`/`False`/`None` que lo permitiría).
 
 **Evolución:** para reglas muy dinámicas, centralizar la construcción de `context` y las
-assertions de dominio en un módulo `app/core/policies.py`.
+assertions de dominio en un módulo `app/core/policies.py`. Para `scope`, un catálogo
+`scope_dimensions` administrable y helpers por recurso.
 
 ### 9.2 Revocación de tokens por sesión
 
@@ -1414,7 +1500,7 @@ El `token_version` invalida **todos** los tokens del usuario a la vez. No permit
 
 El template no tiene soporte para múltiples tenants (clientes/organizaciones). Roles y permisos son globales.
 
-**Evolución:** Agregar `tenant_id: int` a las tablas `users`, `roles`, `permissions`, y filtrar todas las queries por `tenant_id`. Este cambio es invasivo — mejor planificarlo desde el inicio si el proyecto lo requiere.
+**Evolución:** Agregar `tenant_id: int` a las tablas `users`, `roles`, `permissions`, y filtrar todas las queries por `tenant_id`. Este cambio es invasivo — mejor planificarlo desde el inicio si el proyecto lo requiere. El `scope="attribute"` (3.8b) cubre un aislamiento parcial por dimensión (ej. `tenant` como una dimensión más en `user_scopes`) sin reescribir todas las queries, aunque no impone el filtro globalmente como sí lo haría un `tenant_id` nativo.
 
 ### 9.4 Acoplamiento Auth ↔ negocio
 

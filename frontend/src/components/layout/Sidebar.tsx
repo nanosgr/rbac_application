@@ -8,6 +8,7 @@ import {
   Users,
   Shield,
   Key,
+  ShoppingCart,
   ClipboardList,
   LogOut,
   X,
@@ -27,6 +28,7 @@ const navItems: NavItem[] = [
   { label: 'Usuarios',   href: '/users',       icon: Users,  permissions: ['users:read'] },
   { label: 'Roles',      href: '/roles',       icon: Shield, permissions: ['roles:read'] },
   { label: 'Permisos',   href: '/permissions', icon: Key,    permissions: ['permissions:read'] },
+  { label: 'Pedidos',    href: '/orders',      icon: ShoppingCart, permissions: ['orders:read'] },
   { label: 'Auditoría',  href: '/audit',       icon: ClipboardList, permissions: ['audit:read'] },
 ];
 

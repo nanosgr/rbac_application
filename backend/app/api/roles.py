@@ -1,6 +1,6 @@
 import json
 from math import ceil
-from typing import Optional
+from typing import List, Optional
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from sqlmodel import Session
 from app.db.database import get_db
@@ -10,6 +10,7 @@ from app.models.models import User, Role, RoleRead, RoleCreate, RoleUpdate
 from app.schemas.schemas import (
     RolePermissionAssignment,
     RolePermissionRule,
+    RolePermissionRuleRead,
     RoleParentAssignment,
     EffectivePermissionsRead,
     PaginatedResponse,
@@ -138,7 +139,10 @@ def assign_permissions_to_role(
     rules = permission_assignment.rules or [
         RolePermissionRule(permission_id=pid) for pid in permission_assignment.permission_ids
     ]
-    updated_role = role_service.assign_permissions_to_role(db, role_id, rules)
+    try:
+        updated_role = role_service.assign_permissions_to_role(db, role_id, rules)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
     rid, ua, ip = _get_request_meta(request)
     audit_service.log(db, action="assign_permissions", resource="role", resource_id=role_id,
                       user_id=current_user.id, username=current_user.username,
@@ -146,6 +150,19 @@ def assign_permissions_to_role(
                       after_data=json.dumps({"rules": [r.model_dump() for r in rules]}),
                       ip=ip, request_id=rid, user_agent=ua)
     return updated_role
+
+
+@router.get("/{role_id}/permissions", response_model=List[RolePermissionRuleRead])
+def read_role_permission_rules(
+    role_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_role_read()),
+):
+    """Reglas directas del rol (permiso + effect + assertion + scope)."""
+    rules = role_service.get_role_rules(db, role_id)
+    if rules is None:
+        raise HTTPException(status_code=404, detail="Role not found")
+    return rules
 
 
 @router.get("/{role_id}/effective-permissions", response_model=EffectivePermissionsRead)
