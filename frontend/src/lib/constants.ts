@@ -22,6 +22,7 @@ export const EFFECT_OPTIONS = [
   { value: 'deny', label: 'Denegar (deny)' },
 ] as const;
 
+// TEMPLATE:ORDERS:START
 // Estados del modelo de ejemplo Order
 export const ORDER_STATUS_OPTIONS = [
   { value: 'pending', label: 'Pendiente' },
@@ -34,3 +35,4 @@ export const ORDER_STATUS_FILTER_OPTIONS = [
   { value: 'all', label: 'Todos los estados' },
   ...ORDER_STATUS_OPTIONS,
 ] as const;
+// TEMPLATE:ORDERS:END

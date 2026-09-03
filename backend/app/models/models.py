@@ -299,6 +299,7 @@ class UserScopeRead(SQLModel):
     value: str
 
 
+# TEMPLATE:ORDERS:START
 # ---------------------------------------------------------------------------
 # Order — modelo de dominio de ejemplo para demostrar el scoping
 # ---------------------------------------------------------------------------
@@ -346,6 +347,7 @@ class OrderUpdate(SQLModel):
     total: Optional[float] = None
     status: Optional[str] = None
     warehouse: Optional[str] = None
+# TEMPLATE:ORDERS:END
 
 
 # Resolver referencias circulares

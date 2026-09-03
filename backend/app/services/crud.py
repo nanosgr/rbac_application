@@ -3,9 +3,11 @@ from sqlalchemy import select as sa_select
 from sqlalchemy.orm import selectinload
 from typing import List, Optional
 from app.models.models import (
-    User, Role, Permission, RolePermissionLink, RoleParentLink, UserScope, Order,
+    User, Role, Permission, RolePermissionLink, RoleParentLink, UserScope,
     UserCreate, UserUpdate, RoleCreate, RoleUpdate, PermissionCreate, PermissionUpdate,
-    OrderCreate, OrderUpdate,
+    # TEMPLATE:ORDERS:START
+    Order, OrderCreate, OrderUpdate,
+    # TEMPLATE:ORDERS:END
 )
 from app.core.security import get_password_hash, verify_password
 from app.core import rbac
@@ -448,6 +450,7 @@ class UserScopeService:
         return self.list_for_user(db, user_id)
 
 
+# TEMPLATE:ORDERS:START
 class OrderService:
     """CRUD del modelo de dominio de ejemplo, con filtrado por `Scope`."""
 
@@ -490,10 +493,13 @@ class OrderService:
             db.commit()
             return True
         return False
+# TEMPLATE:ORDERS:END
 
 
 user_service = UserService()
 role_service = RoleService()
 permission_service = PermissionService()
 user_scope_service = UserScopeService()
+# TEMPLATE:ORDERS:START
 order_service = OrderService()
+# TEMPLATE:ORDERS:END

@@ -57,10 +57,15 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     if (!user) return false;
     if (user.is_superuser) return true;
     const [resource, action] = permission.split(':');
+    // Coincidencia con comodines, igual que rbac.pattern_matches del backend:
+    // `*:*`, `users:*` y `*:read` deben conceder el permiso.
+    const matches = (p: { resource: string; action: string }) =>
+      (p.resource === '*' || p.resource === resource) &&
+      (p.action === '*' || p.action === action);
     return user.roles.some(
       (role) =>
         role.is_active &&
-        role.permissions.some((p) => p.is_active && p.resource === resource && p.action === action)
+        role.permissions.some((p) => p.is_active && matches(p))
     );
   }, [user]);
 

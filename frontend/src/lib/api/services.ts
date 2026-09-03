@@ -22,10 +22,12 @@ import {
   PermissionRule,
   EffectivePermissions,
   UserScope,
+  // TEMPLATE:ORDERS:START
   Order,
   CreateOrderDTO,
   UpdateOrderDTO,
   GetOrdersParams,
+  // TEMPLATE:ORDERS:END
 } from '@/types';
 
 function buildQuery(params: Record<string, string | number | boolean | undefined>): string {
@@ -132,6 +134,7 @@ export const permissionService = {
     apiClient.get<{ actions: string[] }>('/permissions/actions/available'),
 };
 
+// TEMPLATE:ORDERS:START
 // Order Service (recurso de dominio con alcance de datos)
 export const orderService = {
   getAll: (params: GetOrdersParams = {}) =>
@@ -149,6 +152,7 @@ export const orderService = {
   delete: (id: number) =>
     apiClient.delete<void>(`/orders/${id}`),
 };
+// TEMPLATE:ORDERS:END
 
 // Audit Service
 export const auditService = {

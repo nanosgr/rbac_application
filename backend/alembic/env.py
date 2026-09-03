@@ -11,7 +11,10 @@ sys.path.append(os.path.dirname(os.path.dirname(__file__)))
 from sqlmodel import SQLModel
 from app.models.models import (  # noqa: F401
     User, Role, Permission, UserRoleLink, RolePermissionLink, RoleParentLink,
-    UserScope, Order,
+    UserScope,
+    # TEMPLATE:ORDERS:START
+    Order,
+    # TEMPLATE:ORDERS:END
 )
 from app.core.config import settings
 

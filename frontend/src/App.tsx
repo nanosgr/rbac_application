@@ -10,7 +10,9 @@ import Dashboard from '@/pages/Dashboard';
 import Users from '@/pages/Users';
 import Roles from '@/pages/Roles';
 import Permissions from '@/pages/Permissions';
+// TEMPLATE:ORDERS:START
 import Orders from '@/pages/Orders';
+// TEMPLATE:ORDERS:END
 import Profile from '@/pages/Profile';
 import Audit from '@/pages/Audit';
 import ForgotPassword from '@/pages/ForgotPassword';
@@ -31,7 +33,9 @@ export default function App() {
               <Route path="/users" element={<PrivateRoute><Users /></PrivateRoute>} />
               <Route path="/roles" element={<PrivateRoute><Roles /></PrivateRoute>} />
               <Route path="/permissions" element={<PrivateRoute><Permissions /></PrivateRoute>} />
+              {/* TEMPLATE:ORDERS:START */}
               <Route path="/orders" element={<PrivateRoute><Orders /></PrivateRoute>} />
+              {/* TEMPLATE:ORDERS:END */}
               <Route path="/profile" element={<PrivateRoute><Profile /></PrivateRoute>} />
               <Route path="/audit" element={<PrivateRoute><Audit /></PrivateRoute>} />
               <Route path="*" element={<Navigate to="/" replace />} />

@@ -1,6 +1,9 @@
 from sqlmodel import SQLModel, Session, select
 from app.db.database import engine
-from app.models.models import User, Role, Permission, RolePermissionLink, UserScope, Order
+from app.models.models import User, Role, Permission, RolePermissionLink, UserScope
+# TEMPLATE:ORDERS:START
+from app.models.models import Order
+# TEMPLATE:ORDERS:END
 from app.core.security import get_password_hash
 
 
@@ -42,11 +45,13 @@ def init_db():
                 {"name": "settings:read", "description": "View settings", "resource": "settings", "action": "read"},
                 {"name": "settings:update", "description": "Update settings", "resource": "settings", "action": "update"},
                 {"name": "audit:read", "description": "View audit logs", "resource": "audit", "action": "read"},
+                # TEMPLATE:ORDERS:START
                 # --- recurso de dominio de ejemplo para el scoping de datos ---
                 {"name": "orders:create", "description": "Create orders", "resource": "orders", "action": "create"},
                 {"name": "orders:read", "description": "Read orders", "resource": "orders", "action": "read"},
                 {"name": "orders:update", "description": "Update orders", "resource": "orders", "action": "update"},
                 {"name": "orders:delete", "description": "Delete orders", "resource": "orders", "action": "delete"},
+                # TEMPLATE:ORDERS:END
                 # --- wildcards (demostración del matching resource/action con `*`) ---
                 {"name": "*:*", "description": "Full access (wildcard)", "resource": "*", "action": "*"},
                 {"name": "*:read", "description": "Read any resource (wildcard)", "resource": "*", "action": "read"},
@@ -76,8 +81,10 @@ def init_db():
                 {"name": "Manager", "description": "Management access"},
                 {"name": "User", "description": "Basic user access"},
                 {"name": "Viewer", "description": "Read-only access"},
+                # TEMPLATE:ORDERS:START
                 {"name": "Vendedor", "description": "Acceso a los pedidos propios (scope=own)"},
                 {"name": "Jefe de Deposito", "description": "Acceso a los pedidos de su depósito (scope=attribute/warehouse)"},
+                # TEMPLATE:ORDERS:END
             ]
 
             roles = []
@@ -100,8 +107,10 @@ def init_db():
             manager = by_role.get("Manager")
             user_role = by_role.get("User")
             viewer = by_role.get("Viewer")
+            # TEMPLATE:ORDERS:START
             vendedor = by_role.get("Vendedor")
             jefe_deposito = by_role.get("Jefe de Deposito")
+            # TEMPLATE:ORDERS:END
 
             if roles and permissions:
                 # Super Admin: una sola regla wildcard `*:*`
@@ -142,6 +151,7 @@ def init_db():
 
                 db.commit()
 
+                # TEMPLATE:ORDERS:START
                 # --- Scoping de datos sobre `orders` (modelo de dominio de ejemplo) ---
                 # Vendedor: sólo sus propios pedidos (scope="own", comparado con owner_id).
                 if vendedor:
@@ -157,15 +167,18 @@ def init_db():
                                          scope="attribute", scope_dimension="warehouse")
 
                 db.commit()
+                # TEMPLATE:ORDERS:END
 
             users_data = [
                 {"username": "superadmin", "email": "superadmin@example.com", "full_name": "Super Administrator", "password": "admin123", "is_superuser": True, "role_name": "Super Admin"},
                 {"username": "admin", "email": "admin@example.com", "full_name": "Administrator", "password": "admin123", "is_superuser": False, "role_name": "Admin"},
                 {"username": "manager", "email": "manager@example.com", "full_name": "Manager User", "password": "manager123", "is_superuser": False, "role_name": "Manager"},
                 {"username": "user", "email": "user@example.com", "full_name": "Regular User", "password": "user123", "is_superuser": False, "role_name": "User"},
+                # TEMPLATE:ORDERS:START
                 {"username": "vendedor1", "email": "vendedor1@example.com", "full_name": "Vendedor Uno", "password": "vendedor123", "is_superuser": False, "role_name": "Vendedor"},
                 {"username": "vendedor2", "email": "vendedor2@example.com", "full_name": "Vendedor Dos", "password": "vendedor123", "is_superuser": False, "role_name": "Vendedor"},
                 {"username": "jefe_dep_norte", "email": "jefe_norte@example.com", "full_name": "Jefe Depósito Norte", "password": "jefe123", "is_superuser": False, "role_name": "Jefe de Deposito"},
+                # TEMPLATE:ORDERS:END
             ]
 
             for user_data in users_data:
@@ -181,6 +194,7 @@ def init_db():
 
             db.commit()
 
+            # TEMPLATE:ORDERS:START
             # --- Valores de alcance del usuario (dimensión "warehouse") ---
             jefe = db.exec(select(User).where(User.username == "jefe_dep_norte")).first()
             if jefe:
@@ -202,6 +216,7 @@ def init_db():
                 ])
 
             db.commit()
+            # TEMPLATE:ORDERS:END
             print("Base de datos inicializada correctamente!")
 
             print("\n=== Usuarios creados ===")

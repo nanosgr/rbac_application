@@ -60,6 +60,7 @@ export interface UserScope {
   value: string;
 }
 
+// TEMPLATE:ORDERS:START
 // Order (modelo de dominio de ejemplo con alcance de datos)
 export interface Order {
   id: number;
@@ -91,6 +92,7 @@ export interface GetOrdersParams {
   size?: number;
   status?: string;
 }
+// TEMPLATE:ORDERS:END
 
 // AuditLog types
 export interface AuditLog {

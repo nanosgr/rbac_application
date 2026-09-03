@@ -7,7 +7,7 @@ Create Date: 2026-09-02 12:00:00.000000
 Alcance de datos por permiso/rol:
 - role_permissions.scope / scope_dimension
 - tabla user_scopes (valores del usuario por dimensión)
-- tabla orders (modelo de dominio de ejemplo)
+- tabla orders (modelo de dominio de ejemplo; removible con scripts/remove_orders_domain.sh)
 """
 from alembic import op
 import sqlalchemy as sa
@@ -43,6 +43,7 @@ def upgrade() -> None:
         'ix_user_scopes_user_dimension', 'user_scopes', ['user_id', 'dimension']
     )
 
+    # TEMPLATE:ORDERS:START
     op.create_table(
         'orders',
         sa.Column('id', sa.Integer(), nullable=False),
@@ -56,10 +57,13 @@ def upgrade() -> None:
         sa.ForeignKeyConstraint(['owner_id'], ['users.id'], ondelete='SET NULL'),
         sa.PrimaryKeyConstraint('id'),
     )
+    # TEMPLATE:ORDERS:END
 
 
 def downgrade() -> None:
+    # TEMPLATE:ORDERS:START
     op.drop_table('orders')
+    # TEMPLATE:ORDERS:END
     op.drop_index('ix_user_scopes_user_dimension', table_name='user_scopes')
     op.drop_table('user_scopes')
     op.drop_column('role_permissions', 'scope_dimension')

@@ -47,6 +47,24 @@ pytest
 pytest --cov=app
 ```
 
+### Scaffold a new CRUD resource
+
+`scripts/scaffold_resource.py` generates a full data model (backend + frontend) from
+a YAML spec, following the `orders` reference pattern and its `TEMPLATE:<PLURAL>` sentinel
+markers. See `scripts/scaffold/README.md` and `scripts/scaffold/specs/examples/`.
+
+```bash
+cd backend && ./venv/bin/pip install -r requirements-dev.txt   # jinja2 + pyyaml (dev only)
+python scripts/scaffold_resource.py --from <spec>.yaml --dry-run
+python scripts/scaffold_resource.py --from <spec>.yaml
+python scripts/remove_domain.py <plural>          # undo (byte-clean round-trip)
+python -m pytest scripts/scaffold/tests -q        # generator's own tests
+```
+
+`scoping.mode` = `none` / `own` / `attribute`. `Admin`/`Manager` roles auto-inherit new
+resources via `init_db.py`. Not yet supported: `date`/`datetime` fields,
+`grants.scoped_demo_roles`.
+
 ### Database (PostgreSQL)
 
 **Automated setup:**
@@ -120,9 +138,12 @@ allowed: `users:*`, `*:read`, `*:*` (matched by `rbac.pattern_matches`).
    rules do NOT grant here).
 4. `has_permission(user, resource, action, *, db, context=...)` — full evaluation
    including assertions; call inside the endpoint body.
-5. `require_scope("orders", "read")` — dependency returning `ScopedAccess(user, scope)`;
+5. `require_scope("<resource>", "read")` — dependency returning `ScopedAccess(user, scope)`;
    403 only on `deny` / no rule. The endpoint applies `access.scope` to the query and to
-   loaded rows (see `app/api/orders.py`, the reference domain model).
+   loaded rows.
+<!-- TEMPLATE:ORDERS:START -->
+   The reference implementation lives in `app/api/orders.py` (the `orders` domain model).
+<!-- TEMPLATE:ORDERS:END -->
 
 **Example endpoint with permissions:**
 ```python
@@ -132,12 +153,12 @@ from app.core.deps import require_permissions, has_permission
 def list_users(current_user: User = Depends(require_permissions(["users:read"]))):
     ...
 
-@router.get("/pedidos/{pid}")
-def get_pedido(pid: int, db: Session = Depends(get_db),
-               current_user: User = Depends(get_current_active_user)):
-    pedido = ...
-    if not has_permission(current_user, "pedidos", "read", db=db,
-                          context={"resource_owner_id": pedido.owner_id}):
+@router.get("/documents/{doc_id}")
+def get_document(doc_id: int, db: Session = Depends(get_db),
+                 current_user: User = Depends(get_current_active_user)):
+    document = ...
+    if not has_permission(current_user, "documents", "read", db=db,
+                          context={"resource_owner_id": document.owner_id}):
         raise HTTPException(403)
 ```
 
@@ -167,8 +188,10 @@ The system uses two levels of database abstraction:
   `scope` / `scope_dimension`)
 - Roles ↔ Roles (many-to-many via role_parents; role hierarchy DAG)
 - Users → scope values (`user_scopes`: `user_id, dimension, value`)
+<!-- TEMPLATE:ORDERS:START -->
 - `orders` — reference domain model demonstrating data scoping (`owner_id` for `own`,
   `warehouse` column for `attribute` dimension `"warehouse"`)
+<!-- TEMPLATE:ORDERS:END -->
 
 ### Authentication Flow
 
@@ -210,7 +233,9 @@ All endpoints are prefixed with `/api/v1`:
 - **Users:** `/users/` (CRUD + `/users/me` for current user + `/users/{id}/scopes`)
 - **Roles:** `/roles/` (CRUD + `/roles/{id}/permissions` to assign permissions)
 - **Permissions:** `/permissions/` (CRUD)
+<!-- TEMPLATE:ORDERS:START -->
 - **Orders:** `/orders/` (CRUD; reference model for data-scoped access via `require_scope`)
+<!-- TEMPLATE:ORDERS:END -->
 
 API documentation available at `http://localhost:8000/docs` when running.
 
@@ -221,5 +246,8 @@ API documentation available at `http://localhost:8000/docs` when running.
 - `frontend/` is a React 19 + Vite + Tailwind v4 SPA (`npm run dev` / `npm run build`).
   Pages under `src/pages/`, API layer `src/lib/api/services.ts`, auth in `src/context/AuthContext.tsx`.
   The Roles page has a per-permission rule editor (effect + scope); Users has a `user_scopes`
-  editor; `src/pages/Orders.tsx` demonstrates data-scoped CRUD.
+  editor.
+  <!-- TEMPLATE:ORDERS:START -->
+  `src/pages/Orders.tsx` demonstrates data-scoped CRUD.
+  <!-- TEMPLATE:ORDERS:END -->
 - Always change default passwords and SECRET_KEY before deploying to production.

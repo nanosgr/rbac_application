@@ -8,7 +8,9 @@ import {
   Users,
   Shield,
   Key,
+  // TEMPLATE:ORDERS:START
   ShoppingCart,
+  // TEMPLATE:ORDERS:END
   ClipboardList,
   LogOut,
   X,
@@ -28,7 +30,9 @@ const navItems: NavItem[] = [
   { label: 'Usuarios',   href: '/users',       icon: Users,  permissions: ['users:read'] },
   { label: 'Roles',      href: '/roles',       icon: Shield, permissions: ['roles:read'] },
   { label: 'Permisos',   href: '/permissions', icon: Key,    permissions: ['permissions:read'] },
+  // TEMPLATE:ORDERS:START
   { label: 'Pedidos',    href: '/orders',      icon: ShoppingCart, permissions: ['orders:read'] },
+  // TEMPLATE:ORDERS:END
   { label: 'Auditoría',  href: '/audit',       icon: ClipboardList, permissions: ['audit:read'] },
 ];
 
