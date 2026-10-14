@@ -1,0 +1,7 @@
+# Drivers para scripts/introspect_table.py (generar specs del scaffold desde una BD
+# existente). Opcional, sólo dev. PostgreSQL usa psycopg2-binary de requirements.txt.
+#   ./venv/bin/pip install -r requirements-introspect.txt
+-r requirements-dev.txt
+PyMySQL>=1.1        # MySQL / MariaDB  (mysql+pymysql://, mariadb+pymysql://)
+pymssql>=2.3        # SQL Server       (mssql+pymssql://; alternativa: pyodbc + ODBC Driver)
+pymongo>=4.6        # MongoDB          (mongodb://, mongodb+srv://)

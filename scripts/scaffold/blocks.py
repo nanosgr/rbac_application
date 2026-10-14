@@ -62,13 +62,22 @@ def deps_helpers(s: Spec) -> str:
 
 def app_import(s: Spec) -> str:
     P = s.resource.plural_pascal
-    return f"import {P} from '@/pages/{P}';"
+    lines = [f"import {P} from '@/pages/{P}';"]
+    if s.uses_form_page:
+        lines.append(f"import {P}Form from '@/pages/{P}Form';")
+    return "\n".join(lines)
 
 
 def app_route(s: Spec) -> str:
     P = s.resource.plural_pascal
     p = s.resource.plural
-    return f'<Route path="/{p}" element={{<PrivateRoute><{P} /></PrivateRoute>}} />'
+    lines = [f'<Route path="/{p}" element={{<PrivateRoute><{P} /></PrivateRoute>}} />']
+    if s.uses_form_page:
+        lines += [
+            f'<Route path="/{p}/new" element={{<PrivateRoute><{P}Form /></PrivateRoute>}} />',
+            f'<Route path="/{p}/:id/edit" element={{<PrivateRoute><{P}Form /></PrivateRoute>}} />',
+        ]
+    return "\n".join(lines)
 
 
 def services_type_import(s: Spec) -> str:
@@ -104,14 +113,19 @@ def services_object(s: Spec) -> str:
     ])
 
 
+def _sidebar_icon_alias(s: Spec) -> str:
+    # alias propio: el icono puede ser uno que el Sidebar ya importa (Users, Key, ...)
+    return f"{s.resource.plural_pascal}NavIcon"
+
+
 def sidebar_icon(s: Spec) -> str:
-    return f"{s.resource.icon},"
+    return f"{s.resource.icon} as {_sidebar_icon_alias(s)},"
 
 
 def sidebar_navitem(s: Spec) -> str:
     return (
         f"{{ label: '{s.resource.label_plural}', href: '/{s.resource.plural}', "
-        f"icon: {s.resource.icon}, permissions: ['{s.resource.plural}:read'] }},"
+        f"icon: {_sidebar_icon_alias(s)}, permissions: ['{s.resource.plural}:read'] }},"
     )
 
 

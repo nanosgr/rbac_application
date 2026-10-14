@@ -17,12 +17,24 @@ _BASE = {
     "money": ("number", "sa.Float()", "number"),
     "bool": ("boolean", "sa.Boolean()", "checkbox"),
     "enum": ("string", "sa.String()", "select"),
+    "date": ("string", "sa.Date()", "date"),
+    "datetime": ("string", "sa.DateTime(timezone=True)", "datetime-local"),
 }
 
 _NUMERIC = {"int", "float", "money"}
+_DATES = {"date", "datetime"}
+
+# tipo -> anotación Python
+_PY = {
+    "string": "str", "text": "str", "int": "int", "float": "float", "money": "float",
+    "bool": "bool", "enum": "str", "date": "date", "datetime": "datetime",
+}
 
 
 def ts_type(f: ResourceField) -> str:
+    # una fecha opcional vacía viaja como `null` (el backend no acepta '')
+    if f.type in _DATES and f.optional:
+        return "string | null"
     return _BASE[f.type][0]
 
 
@@ -57,21 +69,26 @@ def model_base_line(f: ResourceField) -> str:
         if f.optional:
             return f"{f.name}: Optional[str] = None"
         return f'{f.name}: str = {_enum_default(f)!r}'
+    if f.type in _DATES:
+        py = _PY[f.type]
+        ann = f"Optional[{py}]" if f.optional else py
+        if f.default is None:
+            return f"{f.name}: {ann} = None" if f.optional else f"{f.name}: {ann}"
+        if str(f.default) in ("today", "now"):
+            factory = "date.today" if f.type == "date" else "datetime.now"
+            return f"{f.name}: {ann} = Field(default_factory={factory})"
+        return f"{f.name}: {ann} = {py}.fromisoformat({str(f.default)!r})"
     raise ValueError(f.type)
 
 
 def dto_update_line(f: ResourceField) -> str:
     """Línea del campo en `<S>Update` (todo Optional[...] = None)."""
-    py = {"string": "str", "text": "str", "int": "int",
-          "float": "float", "money": "float", "bool": "bool", "enum": "str"}[f.type]
-    return f"{f.name}: Optional[{py}] = None"
+    return f"{f.name}: Optional[{_PY[f.type]}] = None"
 
 
 def py_query_annot(f: ResourceField) -> str:
     """Anotación del filtro en el endpoint `GET /` (siempre opcional)."""
-    py = {"string": "str", "text": "str", "int": "int",
-          "float": "float", "money": "float", "bool": "bool", "enum": "str"}[f.type]
-    return f"Optional[{py}]"
+    return f"Optional[{_PY[f.type]}]"
 
 
 # --------------------------------------------------------------------- alembic
@@ -86,6 +103,10 @@ def migration_column(f: ResourceField) -> str:
     elif f.type == "bool" and not f.optional:
         default = "1" if (f.default is None or bool(f.default)) else "0"
         extra = f", server_default=sa.text(\"'{default}'\")"
+    elif f.type == "datetime" and str(f.default) == "now":
+        extra = ", server_default=sa.func.now()"
+    elif f.type == "date" and str(f.default) == "today":
+        extra = ", server_default=sa.func.current_date()"
     return f"sa.Column('{f.name}', {sa}, nullable={nullable}{extra})"
 
 
@@ -98,8 +119,10 @@ def ts_interface_line(f: ResourceField, *, force_optional: bool = False) -> str:
 
 
 def ts_create_line(f: ResourceField) -> str:
-    # enum siempre opcional en el Create DTO (tiene server_default), como orders.status
-    opt = "?" if (f.optional or f.type == "enum") else ""
+    # enum siempre opcional en el Create DTO (tiene server_default), como orders.status;
+    # una fecha con default (`today`/`now`/ISO) también: si viaja vacía, decide el backend
+    has_date_default = f.type in _DATES and f.default is not None
+    opt = "?" if (f.optional or f.type == "enum" or has_date_default) else ""
     return f"{f.name}{opt}: {ts_type(f)};"
 
 
@@ -116,4 +139,6 @@ def ts_empty_value(f: ResourceField) -> str:
         return "true" if (f.default is None or bool(f.default)) else "false"
     if f.type == "enum":
         return f"'{_enum_default(f)}'"
+    if f.type in _DATES:
+        return "''"
     raise ValueError(f.type)

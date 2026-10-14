@@ -104,7 +104,8 @@ export default function Sidebar({ isOpen, onClose }: SidebarProps) {
         {/* Navigation */}
         <nav className="flex-1 px-3 py-3 space-y-0.5 overflow-y-auto">
           {navItems.map((item) => {
-            const isActive = pathname === item.href;
+            // activo también en sub-rutas (ej. /products/new, /products/7/edit)
+            const isActive = pathname === item.href || pathname.startsWith(`${item.href}/`);
             const Icon = item.icon;
             return (
               <ProtectedComponent key={item.href} permissions={item.permissions}>

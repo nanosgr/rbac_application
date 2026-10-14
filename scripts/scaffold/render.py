@@ -27,6 +27,8 @@ def make_env() -> Environment:
         undefined=StrictUndefined,
     )
     env.filters["repr"] = repr
+    # las macros terminan en "\n"; la línea que las invoca ya aporta el suyo
+    env.filters["rstrip"] = lambda text: str(text).rstrip()
     return env
 
 
@@ -56,6 +58,7 @@ def build_context(spec: Spec, *, head_rev: str, new_rev: str) -> dict:
         "scope_mode": spec.scoping.mode,
         "dimension": spec.scoping.dimension,
         "variant": spec.variant,
+        "form_mode": spec.form_mode,
         "grants": spec.grants,
         "frontend": spec.frontend,
         "docs": spec.docs,
@@ -82,7 +85,11 @@ def build_context(spec: Spec, *, head_rev: str, new_rev: str) -> dict:
         "columns_src": frontend.columns_array(spec),
         "form_body_src": frontend.form_body(spec),
         "empty_form_src": frontend.empty_form(spec),
-        "form_pick_src": ", ".join(f"{f.name}: item.{f.name}" for f in spec.fields),
+        "form_pick_src": frontend.form_pick(spec),
+        "payload_src": frontend.payload_fn(spec),
+        "date_helpers_src": (
+            frontend.DATE_HELPERS.rstrip() if frontend.needs_datetime_helpers(spec) else ""
+        ),
         "required_check_src": frontend.required_string_check(spec),
         "filter_enum_fields": [f for f in spec.filter_fields if f.type == "enum"],
         "enum_consts": [
@@ -109,6 +116,10 @@ def _sample_value(f, *, alt: bool = False):
     if f.type == "enum":
         vals = [e.value for e in f.enum_values]
         return vals[-1] if (alt and len(vals) > 1) else vals[0]
+    if f.type == "date":
+        return "2026-02-20" if alt else "2026-01-15"
+    if f.type == "datetime":
+        return "2026-02-20T18:00:00" if alt else "2026-01-15T10:30:00"
     return "x"
 
 

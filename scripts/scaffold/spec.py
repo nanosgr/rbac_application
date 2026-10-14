@@ -27,13 +27,16 @@ except ImportError:  # pragma: no cover
         "  cd backend && ./venv/bin/pip install -r requirements-dev.txt"
     )
 
-# Tipos soportados hoy. `date` / `datetime` quedan para una fase posterior
-# (widgets de fecha en el form + import condicional en models.py).
+# Tipos soportados. `date` / `datetime` aceptan `default` ISO o `today` / `now`.
 FIELD_TYPES = {
-    "string", "text", "int", "float", "money", "bool", "enum",
+    "string", "text", "int", "float", "money", "bool", "enum", "date", "datetime",
 }
+DATE_TYPES = {"date", "datetime"}
 SCOPING_MODES = {"none", "own", "attribute"}
 FRONTEND_VARIANTS = {"auto", "plain", "scoped"}
+# Cómo se edita un registro en el frontend: diálogo modal sobre la lista, o página
+# propia del dashboard (`/<plural>/new` y `/<plural>/:id/edit`).
+FORM_MODES = {"modal", "page"}
 
 # Recursos ya usados por el core RBAC — no se pueden pisar.
 RESERVED_RESOURCES = {
@@ -97,6 +100,7 @@ class Grants:
 class FrontendCfg:
     generate: bool = True
     variant: str = "auto"
+    form_mode: str = "modal"
 
 
 @dataclass
@@ -147,6 +151,18 @@ class Spec:
         return "scoped" if self.is_scoped else "plain"
 
     @property
+    def form_mode(self) -> str:
+        return self.frontend.form_mode
+
+    @property
+    def uses_form_page(self) -> bool:
+        return self.frontend.generate and self.frontend.form_mode == "page"
+
+    @property
+    def date_fields(self) -> list[ResourceField]:
+        return [f for f in self.fields if f.type in DATE_TYPES]
+
+    @property
     def enum_fields(self) -> list[ResourceField]:
         return [f for f in self.fields if f.type == "enum"]
 
@@ -175,11 +191,21 @@ def _humanize(snake: str) -> str:
     return words[:1].upper() + words[1:] if words else words
 
 
+def _normalize_default(value: Any) -> Any:
+    """PyYAML convierte `2026-01-15` sin comillas a date/datetime: lo volvemos ISO."""
+    from datetime import date
+    return value.isoformat() if isinstance(value, date) else value
+
+
 def load_spec(path: str | Path) -> Spec:
     """Carga y normaliza un spec YAML. No valida (usar `validate`)."""
     path = Path(path)
     raw = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+    return spec_from_dict(raw, source_path=path)
 
+
+def spec_from_dict(raw: dict, *, source_path: Path | None = None) -> Spec:
+    """Normaliza un spec ya parseado (dict). No valida (usar `validate`)."""
     r = raw.get("resource", {}) or {}
     singular = str(r.get("singular", "")).strip()
     plural = str(r.get("plural", "")).strip()
@@ -204,7 +230,7 @@ def load_spec(path: str | Path) -> Spec:
             name=str(fr["name"]).strip(),
             type=str(fr.get("type", "string")).strip(),
             optional=bool(fr.get("optional", False)),
-            default=fr.get("default"),
+            default=_normalize_default(fr.get("default")),
             filterable=bool(fr.get("filterable", False)),
             enum_values=evs,
         ))
@@ -226,6 +252,7 @@ def load_spec(path: str | Path) -> Spec:
     frontend = FrontendCfg(
         generate=bool(fe.get("generate", True)),
         variant=str(fe.get("variant", "auto")).strip(),
+        form_mode=str(fe.get("form_mode", "modal")).strip(),
     )
 
     dc = raw.get("docs", {}) or {}
@@ -233,7 +260,7 @@ def load_spec(path: str | Path) -> Spec:
 
     spec = Spec(
         resource=meta, fields=fields, scoping=scoping,
-        grants=grants, frontend=frontend, docs=docs, source_path=path,
+        grants=grants, frontend=frontend, docs=docs, source_path=source_path,
     )
 
     # La dimensión de scope="attribute" es un campo de negocio requerido:
@@ -294,6 +321,15 @@ def validate(spec: Spec, repo_root: Path | None = None) -> tuple[list[str], list
                 errors.append(
                     f"field {f.name!r}: default {f.default!r} no está en enum_values {sorted(values)}"
                 )
+        if f.type in DATE_TYPES:
+            if f.filterable:
+                errors.append(f"field {f.name!r}: filterable no está soportado para {f.type}")
+            if f.default is not None and not _valid_date_default(f.type, f.default):
+                keyword = "today" if f.type == "date" else "now"
+                errors.append(
+                    f"field {f.name!r}: default {f.default!r} inválido para {f.type} "
+                    f"(usá ISO 8601 o {keyword!r})"
+                )
 
     if spec.scoping.mode not in SCOPING_MODES:
         errors.append(f"scoping.mode inválido: {spec.scoping.mode!r} (válidos: {sorted(SCOPING_MODES)})")
@@ -304,6 +340,10 @@ def validate(spec: Spec, repo_root: Path | None = None) -> tuple[list[str], list
 
     if spec.frontend.variant not in FRONTEND_VARIANTS:
         errors.append(f"frontend.variant inválido: {spec.frontend.variant!r}")
+    if spec.frontend.form_mode not in FORM_MODES:
+        errors.append(
+            f"frontend.form_mode inválido: {spec.frontend.form_mode!r} (válidos: {sorted(FORM_MODES)})"
+        )
 
     if spec.grants.scoped_demo_roles:
         warnings.append(
@@ -328,6 +368,19 @@ def validate(spec: Spec, repo_root: Path | None = None) -> tuple[list[str], list
             )
 
     return errors, warnings
+
+
+def _valid_date_default(ftype: str, value: Any) -> bool:
+    """`today` (date) / `now` (datetime) o un literal ISO 8601 parseable."""
+    from datetime import date, datetime
+    text = str(value).strip()
+    if text == ("today" if ftype == "date" else "now"):
+        return True
+    try:
+        (date if ftype == "date" else datetime).fromisoformat(text)
+        return True
+    except ValueError:
+        return False
 
 
 def _existing_marker_files(repo_root: Path, tag: str) -> list[str]:

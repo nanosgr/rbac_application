@@ -18,6 +18,9 @@ fields:
       - { value: low, label: "Baja" }
       - { value: normal, label: "Normal" }
       - { value: high, label: "Alta" }
+  # fechas: `date` (YYYY-MM-DD) y `datetime` (con hora). default: ISO, `today` o `now`.
+  - { name: due_date, type: date, optional: true }
+  - { name: reported_at, type: datetime, optional: false, default: now }
 
 scoping:
   mode: attribute
@@ -25,6 +28,8 @@ scoping:
 
 frontend:
   generate: true
+  # alta/edición como página del dashboard: /tickets/new y /tickets/:id/edit
+  form_mode: page
 
 docs:
   update_claude_md: true

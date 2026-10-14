@@ -38,7 +38,8 @@ def _post_run_block(spec: Spec) -> str:
     lines += [
         f'6. Opcional: agregar "{p}" a get_available_resources() en '
         "backend/app/api/permissions.py",
-        f"7. Smoke: uvicorn + npm run dev  ->  /{p}",
+        f"7. Smoke: uvicorn + npm run dev  ->  /{p}"
+        + (f"  (alta/edición en /{p}/new y /{p}/:id/edit)" if spec.uses_form_page else ""),
         "",
         f"Para deshacer:  python scripts/remove_domain.py {p}",
     ]
@@ -68,6 +69,8 @@ def build_insertions(spec: Spec, repo_root: Path, ctx: dict, env) -> InsertionSe
 
     if spec.frontend.generate:
         iset.add_file(f"frontend/src/pages/{P}.tsx", render(env, "frontend/page.tsx.jinja", ctx))
+    if spec.uses_form_page:
+        iset.add_file(f"frontend/src/pages/{P}Form.tsx", render(env, "frontend/form_page.tsx.jinja", ctx))
 
     # ---------------------------------------------------------------- backend edits
     iset.add_insertion(

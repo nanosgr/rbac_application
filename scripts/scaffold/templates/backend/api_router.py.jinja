@@ -84,7 +84,7 @@ def create_<< singular >>(
     rid, ua, ip = _get_request_meta(request)
     audit_service.log(db, action="create", resource="<< singular >>", resource_id=result.id,
                       user_id=actor.id, username=actor.username,
-                      after_data=json.dumps({<< audit_after >>}),
+                      after_data=json.dumps({<< audit_after >>}, default=str),
                       ip=ip, request_id=rid, user_agent=ua)
     return result
 
@@ -125,13 +125,13 @@ def update_<< singular >>(
     obj = << singular >>_service.get(db, obj_id)
     if obj is None{% if is_scoped %} or not access.scope.matches(obj){% endif %}:
         raise HTTPException(status_code=404, detail="<< S >> not found")
-    before = json.dumps({<< audit_before >>})
+    before = json.dumps({<< audit_before >>}, default=str)
     result = << singular >>_service.update(db, obj_id, payload)
     rid, ua, ip = _get_request_meta(request)
     audit_service.log(db, action="update", resource="<< singular >>", resource_id=obj_id,
                       user_id=actor.id, username=actor.username,
                       before_data=before,
-                      after_data=json.dumps(payload.model_dump(exclude_unset=True)),
+                      after_data=json.dumps(payload.model_dump(exclude_unset=True), default=str),
                       ip=ip, request_id=rid, user_agent=ua)
     return result
 
@@ -155,7 +155,7 @@ def delete_<< singular >>(
     obj = << singular >>_service.get(db, obj_id)
     if obj is None{% if is_scoped %} or not access.scope.matches(obj){% endif %}:
         raise HTTPException(status_code=404, detail="<< S >> not found")
-    before = json.dumps({<< audit_before >>})
+    before = json.dumps({<< audit_before >>}, default=str)
     << singular >>_service.delete(db, obj_id)
     rid, ua, ip = _get_request_meta(request)
     audit_service.log(db, action="delete", resource="<< singular >>", resource_id=obj_id,

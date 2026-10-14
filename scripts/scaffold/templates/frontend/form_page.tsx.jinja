@@ -1,0 +1,107 @@
+{% import "frontend/_form.jinja" as form with context %}
+import { useEffect, useState } from 'react';
+import { useNavigate, useParams } from 'react-router-dom';
+import { useToast } from '@/context/ToastContext';
+import { useAuth } from '@/context/AuthContext';
+import { << singular >>Service } from '@/lib/api/services';
+{% if enum_consts %}
+import {
+{% for c in enum_consts %}
+  << c.options >>,
+{% endfor %}
+} from '@/lib/constants';
+{% endif %}
+import DashboardLayout from '@/components/layout/DashboardLayout';
+import Card from '@/components/common/Card';
+import Input from '@/components/common/Input';
+import Button from '@/components/common/Button';
+import ErrorAlert from '@/components/common/ErrorAlert';
+import Skeleton from '@/components/common/Skeleton';
+import { Create<< S >>DTO } from '@/types';
+import { ArrowLeft } from 'lucide-react';
+
+const emptyForm: Create<< S >>DTO = << empty_form_src >>;
+{% if date_helpers_src or payload_src %}
+<< form.module_helpers() | rstrip >>
+{% endif %}
+
+/**
+ * Alta (`/<< plural >>/new`) y edición (`/<< plural >>/:id/edit`) de << label_plural >>
+ * como página del dashboard (form_mode: page). Recurso generado.
+ */
+export default function << PluralPascal >>FormPage() {
+  const { id } = useParams<{ id?: string }>();
+  const recordId = id ? Number(id) : null;
+  const navigate = useNavigate();
+  const { hasPermission } = useAuth();
+  const { success, error: showError } = useToast();
+
+  const [formData, setFormData] = useState<Create<< S >>DTO>(emptyForm);
+  const [formError, setFormError] = useState('');
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [isLoading, setIsLoading] = useState(recordId !== null);
+
+  const canSave = hasPermission(recordId !== null ? '<< plural >>:update' : '<< plural >>:create');
+  const goBack = () => navigate('/<< plural >>');
+
+  useEffect(() => {
+    if (recordId === null) return;
+    let cancelled = false;
+    setIsLoading(true);
+    << singular >>Service.getById(recordId)
+      .then((item) => {
+        if (!cancelled) setFormData({ << form_pick_src >> });
+      })
+      .catch((err) => {
+        if (cancelled) return;
+        showError(err instanceof Error ? err.message : 'No se encontró el registro');
+        navigate('/<< plural >>', { replace: true });
+      })
+      .finally(() => {
+        if (!cancelled) setIsLoading(false);
+      });
+    return () => { cancelled = true; };
+  }, [recordId, navigate, showError]);
+
+<< form.submit_handler('page') | rstrip >>
+
+  const title = recordId !== null ? `Editar << label_singular >> #${recordId}` : 'Nuevo << label_singular >>';
+
+  return (
+    <DashboardLayout title="<< label_plural >>">
+      <div className="max-w-2xl space-y-4">
+        <Button variant="ghost" size="sm" onClick={goBack} className="flex items-center gap-1.5">
+          <ArrowLeft className="w-4 h-4" />
+          Volver a << label_plural >>
+        </Button>
+
+        <Card title={title}>
+          {isLoading ? (
+            <div className="space-y-4">
+              <Skeleton height="h-9" />
+              <Skeleton height="h-9" />
+              <Skeleton height="h-9" />
+            </div>
+          ) : !canSave ? (
+            <ErrorAlert message="No tenés permiso para guardar este registro." />
+          ) : (
+            <form
+              onSubmit={(e) => {
+                e.preventDefault();
+                handleSubmit();
+              }}
+            >
+              << form.fields() | rstrip | indent(14) >>
+              <div className="mt-6 flex justify-end gap-2">
+                <Button type="button" variant="secondary" onClick={goBack}>Cancelar</Button>
+                <Button type="submit" disabled={isSubmitting}>
+                  {isSubmitting ? 'Guardando...' : recordId !== null ? 'Actualizar' : 'Crear'}
+                </Button>
+              </div>
+            </form>
+          )}
+        </Card>
+      </div>
+    </DashboardLayout>
+  );
+}

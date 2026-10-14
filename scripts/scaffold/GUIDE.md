@@ -38,6 +38,7 @@ con Jinja2. Esto permite tanto generar (`scaffold_resource.py`) como revertir
 
 ```
 scripts/scaffold_resource.py     # entry-point CLI (wrapper fino: sys.path + cli.main())
+scripts/introspect_table.py      # tabla/colección existente -> spec YAML (ver sección 9)
 scripts/remove_domain.py         # "undo" genérico para recursos generados por el scaffold
 scripts/remove_orders_domain.py  # "undo" específico y hardcodeado para el dominio orders
 scripts/scaffold/
@@ -53,10 +54,16 @@ scripts/scaffold/
 ├── domain_files.py              # fuente única de qué archivos toca cada recurso (share cli.py/remove_domain.py)
 ├── alembic_head.py              # detecta el head de Alembic por regex, sin importar Alembic
 ├── strip.py                     # elimina bloques entre marcadores (usado por remove_domain.py)
+├── introspect/                  # conector BD -> spec (sección 9)
+│   ├── __init__.py              # introspect() / list_tables(): despacho SQL vs Mongo por URL
+│   ├── model.py                 # ColumnInfo / TableInfo (representación neutral)
+│   ├── sql.py                   # PostgreSQL/MySQL/MariaDB/MSSQL/SQLite vía sqlalchemy.inspect
+│   ├── mongo.py                 # MongoDB: $jsonSchema o muestreo de documentos
+│   └── mapping.py               # TableInfo -> dict del spec + YAML comentado
 ├── specs/
 │   └── examples/
 │       ├── products.yaml        # ejemplo con scoping "own"
-│       └── tickets.yaml         # ejemplo con scoping "attribute"
+│       └── tickets.yaml         # ejemplo con scoping "attribute", fechas y form_mode: page
 │   # scripts/scaffold/specs/<plural>.yaml (sin "examples/") = copia canónica
 │   # de cada recurso YA generado; la crea el propio cli.py y la usa remove_domain.py.
 ├── templates/
@@ -67,12 +74,15 @@ scripts/scaffold/
 │   │   ├── service_block.py.jinja   # bloque insertado en crud.py
 │   │   └── test_resource.py.jinja   # archivo nuevo completo
 │   └── frontend/
-│       ├── page.tsx.jinja           # archivo nuevo completo
+│       ├── page.tsx.jinja           # lista (+ modal de alta/edición si form_mode: modal)
+│       ├── form_page.tsx.jinja      # página de alta/edición (sólo form_mode: page)
+│       ├── _form.jinja              # macros compartidas: campos, handleSubmit, helpers de fecha
 │       ├── types_block.ts.jinja     # bloque insertado en types/index.ts
 │       └── constants_block.ts.jinja # bloque insertado (append_eof) en constants.ts
 └── tests/
     ├── conftest.py               # agrega la raíz del repo a sys.path
-    └── test_scaffold.py          # tests unitarios del generador (ver sección 8)
+    ├── test_scaffold.py          # tests unitarios del generador (ver sección 8)
+    └── test_introspect.py        # tests del conector BD -> spec (sin servidores)
 ```
 
 Por qué `blocks.py`/`frontend.py` NO usan Jinja para los fragmentos chicos: los
@@ -101,10 +111,11 @@ resource:
 
 fields:                       # al menos 1, nombres únicos y snake_case
   - name: name
-    type: string               # string | text | int | float | money | bool | enum
+    type: string               # string | text | int | float | money | bool | enum | date | datetime
     optional: false             # default false
-    default: null                # coherente con el tipo; para enum debe estar en enum_values
-    filterable: false            # solo relevante para tabla/UI de frontend
+    default: null                # coherente con el tipo; para enum debe estar en enum_values;
+                                 # date: ISO (2026-01-15) o `today`; datetime: ISO o `now`
+    filterable: false            # solo relevante para tabla/UI de frontend (no admitido en date/datetime)
     enum_values:                 # obligatorio si type == enum
       - {value: general, label: General}
       - {value: perishable, label: Perecedero}
@@ -122,6 +133,9 @@ grants:
 frontend:
   generate: true               # si false, no genera nada de frontend
   variant: auto                 # auto | plain | scoped
+  form_mode: modal              # modal | page — cómo se crea/edita un registro:
+                                 #   modal: diálogo sobre la lista (default)
+                                 #   page:  página del dashboard en /<plural>/new y /<plural>/:id/edit
 
 docs:
   update_claude_md: true       # si true, inserta líneas en CLAUDE.md
@@ -136,7 +150,8 @@ reports, settings`. Nombres de campo reservados (no pueden repetirse como `field
 - *Errores* (abortan antes de tocar el disco): identificadores inválidos, colisión con
   recursos reservados, cero campos, campo duplicado o con nombre reservado, tipo
   desconocido, enum sin `enum_values` o con `default` fuera de los valores, `scoping.mode`
-  inválido, `attribute` sin `dimension`, `frontend.variant` inválida, y — el chequeo más
+  inválido, `attribute` sin `dimension`, `frontend.variant` o `frontend.form_mode`
+  inválidos, `default` de fecha que no es ISO/`today`/`now`, `filterable` en una fecha, y — el chequeo más
   importante para evitar corrupción — **detección de que el recurso ya fue scaffoldeado**
   (busca recursivamente el marcador `TEMPLATE:<PLURAL>:` en `backend/app`, `frontend/src`
   y `scripts/scaffold/specs`; si lo encuentra, exige correr `remove_domain.py` primero).
@@ -153,6 +168,7 @@ reports, settings`. Nombres de campo reservados (no pueden repetirse como `field
 | `backend/alembic/versions/<rev>_add_<plural>.py` | `templates/backend/migration.py.jinja` |
 | `backend/tests/test_<plural>.py` | `templates/backend/test_resource.py.jinja` |
 | `frontend/src/pages/<PluralPascal>.tsx` (si `frontend.generate`) | `templates/frontend/page.tsx.jinja` |
+| `frontend/src/pages/<PluralPascal>Form.tsx` (si `form_mode: page`) | `templates/frontend/form_page.tsx.jinja` |
 | `scripts/scaffold/specs/<plural>.yaml` | copia literal del YAML de entrada (referencia canónica para `remove_domain.py`) |
 
 ### 4.2 Archivos existentes editados por inserción anclada
@@ -254,7 +270,8 @@ generador genérico, habría que escribirle un `orders.yaml` — hoy no existe.
 | Limitación | Evidencia en código |
 |---|---|
 | `grants.scoped_demo_roles` no implementado | `spec.py` declara el campo pero sólo emite un *warning*; no se lee en `cli.py`, `blocks.py`, `render.py` ni en ninguna plantilla. Si se necesitan roles demo con scope (tipo `Vendedor`/`Jefe de Depósito` de `orders`), hay que agregarlos a mano en `init_db.py` siguiendo ese mismo patrón (`_ensure_link(db, role.id, perm.id, scope="own")` / `scope="attribute", scope_dimension=...`). |
-| Tipos `date`/`datetime` no soportados | `FIELD_TYPES` en `spec.py` no los incluye; un spec con `type: date` es rechazado en `validate()`. Pendiente: widgets de fecha en el form + import condicional en `models.py`. |
+| Fechas no filtrables | `validate()` rechaza `filterable: true` en `date`/`datetime` (el filtro de la lista es por igualdad y el frontend sólo genera filtros de enum). |
+| Introspección: sin relaciones | Las FK se generan como `int` plano (con aviso); no hay selects que listen el recurso relacionado. JSON, binarios, arrays, `time` e intervalos se omiten. |
 | `--interactive` no implementado | El flag existe en `cli.py` pero sólo imprime el aviso y retorna código 2. Siempre hay que usar `--from <spec.yaml>`. |
 | `permissions.py::get_available_resources()` no se actualiza automáticamente | Lista hardcodeada; el generador lo señala como paso manual opcional en el resumen post-run. |
 | La migración Alembic generada no se testea automáticamente | Los tests del generador usan SQLite in-memory vía `SQLModel.metadata.create_all`, no ejecutan la migración real. Las migraciones están pensadas para PostgreSQL (estilo `sa.*` plano). |
@@ -311,7 +328,8 @@ Escribir a mano (o extender el generador primero, ver 7.4) si el recurso necesit
 
 ### 7.4 Cómo extender el generador mismo
 
-Si hace falta soportar una capacidad nueva (ejemplo: tipo `date`):
+Si hace falta soportar una capacidad nueva (ejemplo: tipo `time`; `date`/`datetime`
+siguieron exactamente estos pasos):
 1. `scripts/scaffold/spec.py` — agregar el tipo a `FIELD_TYPES` y las reglas de
    validación que correspondan (`validate()`).
 2. `scripts/scaffold/typemap.py` — agregar el mapeo del tipo nuevo a línea de modelo
@@ -345,8 +363,70 @@ Si hace falta soportar una capacidad nueva (ejemplo: tipo `date`):
   dry-run contra el árbol real del repo; todos los `.py` resultantes son válidos.
 - `test_domain_files_consistent` — `files_with_markers()` y `files_to_delete()` son
   listas disjuntas y contienen las entradas esperadas.
+- `form_mode`: validación, render de cada modo (`<Modal` vs `useNavigate` + `<P>Form.tsx`),
+  y `test_page_mode_wiring_roundtrip_is_byte_clean` (rutas extra dentro del bloque de
+  marcadores; quitarlo deja cada archivo editado idéntico al original).
+- Fechas: `test_date_typemap` (modelo, migración, TS, form, columna, payload) y
+  `test_date_validation`.
+- `test_introspect.py` — introspección SQL contra SQLite real, clasificación de tipos de
+  cada dialecto (PostgreSQL/MySQL/MSSQL), parseo de defaults y CHECK IN, inferencia Mongo
+  (muestreo y `$jsonSchema`), y el CLI `introspect_table.py` de punta a punta.
 
 No hay un test end-to-end que ejecute el CLI completo y luego `remove_domain.py` sobre
 un recurso recién generado; la garantía de reversión se prueba a nivel de las piezas
 (`InsertionSet`/`strip_marker_blocks`) y de consistencia de listas de archivos, no del
 flujo completo en un checkout real.
+
+## 9. Generar el spec desde una tabla existente (`scripts/introspect_table.py`)
+
+Lee la estructura de una tabla (o colección) y escribe un spec YAML listo para revisar y
+pasar a `scaffold_resource.py`. La tabla externa es **sólo fuente de diseño**: el recurso
+generado crea su propia tabla (con migración) en la BD de la app.
+
+```bash
+cd backend && ./venv/bin/pip install -r requirements-introspect.txt   # PyMySQL, pymssql, pymongo
+export SRC_DB_URL='mysql://user:pass@host:3306/ventas'   # evita la contraseña en el historial
+python scripts/introspect_table.py --url-env SRC_DB_URL --list-tables
+python scripts/introspect_table.py --url-env SRC_DB_URL --table clientes \
+    --plural customers --singular customer --icon Users --form-mode page \
+    -o scripts/scaffold/specs/examples/customers.yaml
+python scripts/scaffold_resource.py --from scripts/scaffold/specs/examples/customers.yaml --dry-run
+# o todo junto: ... -o /tmp/customers.yaml --then-scaffold
+```
+
+| Motor | URL | Driver |
+|---|---|---|
+| PostgreSQL | `postgresql://…` / `postgres://…` | `psycopg2-binary` (ya instalado) |
+| MySQL | `mysql://…` → `mysql+pymysql` | `PyMySQL` |
+| MariaDB | `mariadb://…` → `mariadb+pymysql` | `PyMySQL` |
+| SQL Server | `mssql://…` → `mssql+pymssql` (o `mssql+pyodbc://…`) | `pymssql` / `pyodbc` |
+| MongoDB | `mongodb://host/db`, `mongodb+srv://…` (o `--database`) | `pymongo` |
+
+Otros flags: `--schema` (SQL), `--sample N` y `--infer-enums N` (Mongo), `--scoping`,
+`--dimension`, `--label-singular/--label-plural`, `--force`.
+
+**Mapeo de tipos** (`introspect/sql.py:classify_type` + `introspect/mapping.py`):
+
+| Origen | Spec |
+|---|---|
+| VARCHAR/CHAR/NVARCHAR(≤255) | `string` |
+| TEXT, *TEXT, NVARCHAR(MAX), VARCHAR sin largo o >255 | `text` |
+| INT/SMALLINT/BIGINT, TINYINT(n>1) | `int` |
+| FLOAT/REAL/DOUBLE | `float` |
+| NUMERIC/DECIMAL/MONEY | `money` (aviso de precisión) |
+| BOOLEAN, BIT, TINYINT(1) | `bool` |
+| ENUM nativo, `CHECK (col IN (...))`, `$jsonSchema.enum` | `enum` (+ `filterable: true`) |
+| DATE | `date` |
+| TIMESTAMP/DATETIME/DATETIME2/DATETIMEOFFSET, BSON date | `datetime` |
+| UUID/UNIQUEIDENTIFIER, ObjectId | `string` (aviso) |
+| FK | tipo de la columna (aviso: la relación no se genera) |
+| JSON, BLOB/BYTEA, arrays, subdocumentos, TIME | omitida (aviso) |
+
+Además: la PK simple se reemplaza por `id`; `created_at`/`updated_at`/`owner_id` se
+descartan (los crea el scaffold); los nombres se pasan a snake_case; `nullable` →
+`optional`; los defaults simples se copian (`'x'::varchar`, `((0))`, `now()`/`getdate()`
+→ `now`, `CURRENT_DATE` → `today`). Cada decisión con pérdida queda como **aviso** en
+stderr y como comentario en la cabecera del YAML. Si el spec resultante no valida (ej. el
+nombre choca con un recurso reservado) se escribe igual y el comando sale con código 1
+para que lo corrijas a mano.
+

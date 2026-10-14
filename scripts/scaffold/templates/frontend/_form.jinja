@@ -1,0 +1,65 @@
+{#
+  Piezas del formulario compartidas por `page.tsx.jinja` (form_mode: modal) y
+  `form_page.tsx.jinja` (form_mode: page), para que ambos modos generen exactamente
+  los mismos campos, validación y payload. Importar con:
+    {% import "frontend/_form.jinja" as form with context %}
+#}
+
+{# Helpers a nivel de módulo (fechas). Vacío si el recurso no tiene fechas. #}
+{% macro module_helpers() %}
+{% if date_helpers_src %}
+
+<< date_helpers_src >>
+{% endif %}
+{% if payload_src %}
+
+<< payload_src >>
+{% endif %}
+{% endmacro %}
+
+{#
+  `handleSubmit`. `mode`:
+    - "modal": edita `editing` (fila de la lista); al guardar cierra y recarga.
+    - "page": edita `recordId` (de la URL); al guardar vuelve a la lista.
+#}
+{% macro submit_handler(mode) %}
+  const handleSubmit = async () => {
+    setFormError('');
+{% if required_check_src %}
+    << required_check_src >>
+{% endif %}
+    setIsSubmitting(true);
+    try {
+{% if mode == 'modal' %}
+      if (editing) {
+        await << singular >>Service.update(editing.id, << 'toPayload(formData)' if payload_src else 'formData' >>);
+{% else %}
+      if (recordId !== null) {
+        await << singular >>Service.update(recordId, << 'toPayload(formData)' if payload_src else 'formData' >>);
+{% endif %}
+        success('<< label_singular >> actualizado');
+      } else {
+        await << singular >>Service.create(<< 'toPayload(formData)' if payload_src else 'formData' >>);
+        success('<< label_singular >> creado');
+      }
+{% if mode == 'modal' %}
+      setIsModalOpen(false);
+      await load(page, pageSize);
+{% else %}
+      navigate('/<< plural >>');
+{% endif %}
+    } catch (err) {
+      setFormError(err instanceof Error ? err.message : 'Error al guardar');
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+{% endmacro %}
+
+{# Cuerpo del form: alerta de error + un control por campo. #}
+{% macro fields() %}
+<div className="space-y-4">
+  <ErrorAlert message={formError} />
+  << form_body_src | indent(2) >>
+</div>
+{% endmacro %}

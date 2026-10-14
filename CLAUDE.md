@@ -59,11 +59,17 @@ python scripts/scaffold_resource.py --from <spec>.yaml --dry-run
 python scripts/scaffold_resource.py --from <spec>.yaml
 python scripts/remove_domain.py <plural>          # undo (byte-clean round-trip)
 python -m pytest scripts/scaffold/tests -q        # generator's own tests
+
+# spec from an existing table (PostgreSQL/MySQL/MariaDB/MSSQL/MongoDB; design source only)
+cd backend && ./venv/bin/pip install -r requirements-introspect.txt
+python scripts/introspect_table.py --url-env SRC_DB_URL --list-tables
+python scripts/introspect_table.py --url-env SRC_DB_URL --table <t> -o <spec>.yaml [--then-scaffold]
 ```
 
-`scoping.mode` = `none` / `own` / `attribute`. `Admin`/`Manager` roles auto-inherit new
-resources via `init_db.py`. Not yet supported: `date`/`datetime` fields,
-`grants.scoped_demo_roles`.
+`scoping.mode` = `none` / `own` / `attribute`. `frontend.form_mode` = `modal` (default) /
+`page` (`/<plural>/new` + `/<plural>/:id/edit`, file `<PluralPascal>Form.tsx`). Field types
+include `date` / `datetime` (default ISO, `today`, `now`). `Admin`/`Manager` roles
+auto-inherit new resources via `init_db.py`. Not yet supported: `grants.scoped_demo_roles`.
 
 ### Database (PostgreSQL)
 

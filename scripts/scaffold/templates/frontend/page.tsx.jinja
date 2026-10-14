@@ -1,4 +1,8 @@
+{% import "frontend/_form.jinja" as form with context %}
 import { useCallback, useEffect, useState } from 'react';
+{% if form_mode == 'page' %}
+import { useNavigate } from 'react-router-dom';
+{% endif %}
 import { useToast } from '@/context/ToastContext';
 import { useConfirm } from '@/lib/hooks/useConfirm';
 {% if is_scoped %}
@@ -19,27 +23,39 @@ import {
 import DashboardLayout from '@/components/layout/DashboardLayout';
 import Card from '@/components/common/Card';
 import Table from '@/components/common/Table';
+{% if form_mode == 'modal' %}
 import Modal from '@/components/common/Modal';
 import Input from '@/components/common/Input';
+{% endif %}
 import Button from '@/components/common/Button';
 import ProtectedComponent from '@/components/common/ProtectedComponent';
 {% if filter_enum_fields %}
 import FilterSelect from '@/components/common/FilterSelect';
 {% endif %}
 import Pagination from '@/components/common/Pagination';
+{% if form_mode == 'modal' %}
 import ErrorAlert from '@/components/common/ErrorAlert';
 import ModalFooter from '@/components/common/ModalFooter';
+{% endif %}
 {% if is_scoped %}
 import { useAuth } from '@/context/AuthContext';
 {% endif %}
-import { << S >>, Create<< S >>DTO, TableColumn, TableAction{% if is_scoped %}, UserScope{% endif %} } from '@/types';
+import { << S >>, {% if form_mode == 'modal' %}Create<< S >>DTO, {% endif %}TableColumn, TableAction{% if is_scoped %}, UserScope{% endif %} } from '@/types';
 import { << icon >> as ResourceIcon, Pencil, Trash2{% if is_scoped %}, Filter{% endif %} } from 'lucide-react';
 
+{% if form_mode == 'modal' %}
 const emptyForm: Create<< S >>DTO = << empty_form_src >>;
+{% if date_helpers_src or payload_src %}
+<< form.module_helpers() | rstrip >>
+{% endif %}
+{% endif %}
 
 export default function << PluralPascal >>Page() {
 {% if is_scoped %}
   const { user } = useAuth();
+{% endif %}
+{% if form_mode == 'page' %}
+  const navigate = useNavigate();
 {% endif %}
   const { success, error: showError } = useToast();
   const { confirm, ConfirmationDialog } = useConfirm();
@@ -56,12 +72,14 @@ export default function << PluralPascal >>Page() {
 {% if is_scoped %}
   const [myScopes, setMyScopes] = useState<UserScope[]>([]);
 {% endif %}
+{% if form_mode == 'modal' %}
 
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editing, setEditing] = useState<< '<' + S >> | null>(null);
   const [formData, setFormData] = useState<Create<< S >>DTO>(emptyForm);
   const [formError, setFormError] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
+{% endif %}
 
   const load = useCallback(async (currentPage: number, size: number) => {
     setIsLoading(true);
@@ -100,6 +118,7 @@ export default function << PluralPascal >>Page() {
   }, []);
 {% endif %}
 
+{% if form_mode == 'modal' %}
   const openCreate = () => {
     setEditing(null);
     setFormData(emptyForm);
@@ -113,6 +132,11 @@ export default function << PluralPascal >>Page() {
     setFormError('');
     setIsModalOpen(true);
   };
+{% else %}
+  const openCreate = () => navigate('/<< plural >>/new');
+
+  const openEdit = (item: << S >>) => navigate(`/<< plural >>/${item.id}/edit`);
+{% endif %}
 
   const handleDelete = async (item: << S >>) => {
     const confirmed = await confirm({
@@ -132,29 +156,10 @@ export default function << PluralPascal >>Page() {
     }
   };
 
-  const handleSubmit = async () => {
-    setFormError('');
-{% if required_check_src %}
-    << required_check_src >>
-{% endif %}
-    setIsSubmitting(true);
-    try {
-      if (editing) {
-        await << singular >>Service.update(editing.id, formData);
-        success('<< label_singular >> actualizado');
-      } else {
-        await << singular >>Service.create(formData);
-        success('<< label_singular >> creado');
-      }
-      setIsModalOpen(false);
-      await load(page, pageSize);
-    } catch (err) {
-      setFormError(err instanceof Error ? err.message : 'Error al guardar');
-    } finally {
-      setIsSubmitting(false);
-    }
-  };
+{% if form_mode == 'modal' %}
+<< form.submit_handler('modal') | rstrip >>
 
+{% endif %}
   const startIndex = total === 0 ? 0 : (page - 1) * pageSize + 1;
   const endIndex = Math.min(page * pageSize, total);
 
@@ -232,6 +237,7 @@ export default function << PluralPascal >>Page() {
         </Card>
       </div>
 
+{% if form_mode == 'modal' %}
       <Modal
         isOpen={isModalOpen}
         onClose={() => setIsModalOpen(false)}
@@ -245,12 +251,10 @@ export default function << PluralPascal >>Page() {
           />
         }
       >
-        <div className="space-y-4">
-          <ErrorAlert message={formError} />
-          << form_body_src | indent(10) >>
-        </div>
+        << form.fields() | rstrip | indent(8) >>
       </Modal>
 
+{% endif %}
       <ConfirmationDialog />
     </DashboardLayout>
   );

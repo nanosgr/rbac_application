@@ -166,3 +166,138 @@ def test_domain_files_consistent():
     assert f"backend/app/api/{spec.resource.plural}.py" in dels
     # un archivo no puede estar en las dos listas
     assert not (set(marks) & set(dels))
+
+
+# ------------------------------------------------------------------ form_mode
+
+_FORM_SPEC = """
+    resource: {{ singular: gizmo, plural: gizmos, icon: Box }}
+    fields:
+      - {{ name: title, type: string }}
+      - {{ name: due, type: date, optional: true }}
+      - {{ name: at, type: datetime, default: now }}
+    scoping: {{ mode: {mode} }}
+    frontend: {{ form_mode: {form_mode} }}
+"""
+
+
+def _form_spec(tmp_path, form_mode, mode="none"):
+    return load_spec(_write_spec(tmp_path, _FORM_SPEC.format(form_mode=form_mode, mode=mode)))
+
+
+def test_spec_rejects_invalid_form_mode(tmp_path):
+    spec = _form_spec(tmp_path, "drawer")
+    assert any("form_mode" in e for e in validate(spec)[0])
+
+
+def test_form_mode_defaults_to_modal(tmp_path):
+    spec = load_spec(_write_spec(tmp_path, """
+        resource: { singular: item, plural: items }
+        fields: [{ name: x, type: string }]
+    """))
+    assert spec.form_mode == "modal" and not spec.uses_form_page
+
+
+def test_modal_mode_renders_modal(tmp_path):
+    spec = _form_spec(tmp_path, "modal")
+    ctx = build_context(spec, head_rev="x", new_rev=new_revision_id())
+    page = make_env().get_template("frontend/page.tsx.jinja").render(**ctx)
+    assert "<Modal" in page and "useNavigate" not in page
+    assert "toPayload(formData)" in page and "fromLocalInput" in page
+
+
+@pytest.mark.parametrize("mode", ["none", "own"])
+def test_page_mode_renders_form_page(tmp_path, mode):
+    spec = _form_spec(tmp_path, "page", mode)
+    assert validate(spec)[0] == []
+    env = make_env()
+    ctx = build_context(spec, head_rev="x", new_rev=new_revision_id())
+    page = env.get_template("frontend/page.tsx.jinja").render(**ctx)
+    form = env.get_template("frontend/form_page.tsx.jinja").render(**ctx)
+    assert "<Modal" not in page and "Modal'" not in page
+    assert "navigate('/gizmos/new')" in page and "/gizmos/${item.id}/edit" in page
+    assert "export default function GizmosFormPage" in form
+    assert "gizmoService.getById(recordId)" in form
+    assert "navigate('/gizmos')" in form and "toPayload(formData)" in form
+
+
+def test_page_mode_wiring_roundtrip_is_byte_clean(tmp_path):
+    """Las rutas extra quedan dentro del bloque de marcadores: quitarlo deja el archivo intacto."""
+    spec = _form_spec(tmp_path, "page")
+    env = make_env()
+    ctx = build_context(spec, head_rev=current_head(REPO), new_rev=new_revision_id())
+    iset = build_insertions(spec, REPO, ctx, env)
+    rendered = iset.render()
+
+    app = rendered[REPO / "frontend/src/App.tsx"][1]
+    assert '<Route path="/gizmos/new"' in app and '<Route path="/gizmos/:id/edit"' in app
+    assert "import GizmosForm from '@/pages/GizmosForm';" in app
+
+    for path, (old, new) in rendered.items():
+        if old is None:  # archivo nuevo: lo borra remove_domain, no se le quitan bloques
+            continue
+        back, _ = strip_marker_blocks(new, spec.marker_tag)
+        assert back == old, path
+
+    assert REPO / "frontend/src/pages/GizmosForm.tsx" in iset._new
+    assert "frontend/src/pages/GizmosForm.tsx" in domain_files.files_to_delete(spec)
+
+
+def test_modal_mode_has_no_form_page(tmp_path):
+    spec = _form_spec(tmp_path, "modal")
+    iset = build_insertions(spec, REPO, build_context(spec, head_rev="x", new_rev="y"), make_env())
+    assert REPO / "frontend/src/pages/GizmosForm.tsx" not in iset._new
+    assert not any(p.endswith("Form.tsx") for p in domain_files.files_to_delete(spec))
+
+
+# ---------------------------------------------------------------- date / datetime
+
+
+def test_date_typemap(tmp_path):
+    from scripts.scaffold import typemap
+    spec = load_spec(_write_spec(tmp_path, """
+        resource: { singular: item, plural: items }
+        fields:
+          - { name: d_req, type: date }
+          - { name: d_opt, type: date, optional: true }
+          - { name: d_today, type: date, default: today }
+          - { name: d_iso, type: date, default: 2026-01-15 }
+          - { name: t_now, type: datetime, default: now }
+          - { name: t_opt, type: datetime, optional: true }
+    """))
+    assert validate(spec)[0] == []
+    f = {x.name: x for x in spec.fields}
+    assert typemap.model_base_line(f["d_req"]) == "d_req: date"
+    assert typemap.model_base_line(f["d_opt"]) == "d_opt: Optional[date] = None"
+    assert typemap.model_base_line(f["d_today"]) == "d_today: date = Field(default_factory=date.today)"
+    assert typemap.model_base_line(f["d_iso"]) == "d_iso: date = date.fromisoformat('2026-01-15')"
+    assert typemap.model_base_line(f["t_now"]) == "t_now: datetime = Field(default_factory=datetime.now)"
+    assert typemap.dto_update_line(f["t_opt"]) == "t_opt: Optional[datetime] = None"
+    assert "sa.Date()" in typemap.migration_column(f["d_req"])
+    assert "server_default=sa.func.now()" in typemap.migration_column(f["t_now"])
+    assert "server_default=sa.func.current_date()" in typemap.migration_column(f["d_today"])
+    assert typemap.ts_interface_line(f["d_opt"]) == "d_opt?: string | null;"
+    assert typemap.ts_create_line(f["t_now"]) == "t_now?: string;"
+    assert typemap.ts_create_line(f["d_req"]) == "d_req: string;"
+
+    assert 'type="date"' in frontend.form_field(spec, f["d_req"])
+    assert 'type="datetime-local"' in frontend.form_field(spec, f["t_opt"])
+    assert "toLocaleDateString" in frontend.column(spec, f["d_req"])
+    assert "toLocalInput(item.t_opt)" in frontend.form_pick(spec)
+    payload = frontend.payload_fn(spec)
+    assert "d_opt: f.d_opt ? f.d_opt : null," in payload
+    assert "t_now: f.t_now ? fromLocalInput(f.t_now) : undefined," in payload
+    assert "!formData.d_req?.trim()" in frontend.required_string_check(spec)
+
+
+@pytest.mark.parametrize("body, needle", [
+    ("{ name: d, type: date, default: now }", "default"),
+    ("{ name: d, type: datetime, default: ayer }", "default"),
+    ("{ name: d, type: date, filterable: true }", "filterable"),
+])
+def test_date_validation(tmp_path, body, needle):
+    spec = load_spec(_write_spec(tmp_path, f"""
+        resource: {{ singular: item, plural: items }}
+        fields: [{body}]
+    """))
+    assert any(needle in e for e in validate(spec)[0])

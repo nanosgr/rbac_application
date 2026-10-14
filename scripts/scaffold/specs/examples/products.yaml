@@ -33,6 +33,9 @@ grants:
 frontend:
   generate: true
   variant: auto
+  # modal (default): alta/edición en un diálogo sobre la lista.
+  # page: página propia del dashboard en /products/new y /products/:id/edit.
+  form_mode: modal
 
 docs:
   update_claude_md: true

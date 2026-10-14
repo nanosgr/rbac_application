@@ -31,6 +31,8 @@ def files_to_delete(spec: Spec, repo_root: Path | None = None) -> list[str]:
     ]
     if spec.frontend.generate:
         files.append(f"frontend/src/pages/{spec.resource.plural_pascal}.tsx")
+    if spec.uses_form_page:
+        files.append(f"frontend/src/pages/{spec.resource.plural_pascal}Form.tsx")
     if repo_root is not None:
         files.extend(find_migration_files(repo_root, p))
     return files
